@@ -1,0 +1,1301 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>local-gateway</title>
+<style>
+  :root {
+    --base:    #eff1f5;
+    --surface: #e6e9ef;
+    --sunken:  #dce0e8;
+    --line:    #ccd0da;
+    --wire:    #bcc0cc;
+    --text:    #4c4f69;
+    --muted:   #6c6f85;
+    --faint:   #8c8fa1;
+    --live:    #179299;
+    --dead:    #d20f39;
+    --warn:    #df8e1d;
+    --accent:  #8839ef;
+    --focus:   #1e66f5;
+    --far:     #fe640b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --base:    #1e1e2e;
+      --surface: #181825;
+      --sunken:  #11111b;
+      --line:    #313244;
+      --wire:    #45475a;
+      --text:    #cdd6f4;
+      --muted:   #a6adc8;
+      --faint:   #7f849c;
+      --live:    #94e2d5;
+      --dead:    #f38ba8;
+      --warn:    #f9e2af;
+      --accent:  #cba6f7;
+      --focus:   #89b4fa;
+      --far:     #fab387;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  html { -webkit-text-size-adjust: 100%; }
+
+  body {
+    margin: 0;
+    padding: 24px 20px 40px;
+    background: var(--base);
+    color: var(--text);
+    font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    font-synthesis: none;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  main { max-width: 680px; margin: 0 auto; }
+
+  .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace; }
+
+  /* ---- header ------------------------------------------------------- */
+
+  header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  h1 {
+    margin: 0;
+    font-size: 19px;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  }
+
+  #summary {
+    font-size: 12px;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    white-space: nowrap;
+  }
+
+  #link-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--live);
+    flex: none;
+  }
+  #summary[data-link="down"] #link-dot { background: var(--dead); }
+  #summary[data-link="down"]           { color: var(--dead); }
+
+  /* ---- login -------------------------------------------------------- */
+
+  .login {
+    max-width: 320px;
+    margin: 12vh auto 0;
+  }
+  .login h1 { font-size: 20px; }
+  .login-note {
+    margin: 8px 0 20px;
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+  .login form { display: flex; flex-direction: column; gap: 12px; }
+  .login .f > span { font-size: 11px; }
+  .login input[type="password"] {
+    width: 100%;
+    padding: 7px 9px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    background: var(--base);
+    color: var(--text);
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    font-size: 13px;
+    letter-spacing: 0.08em;
+  }
+  .login input[type="password"]:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: -1px;
+    border-color: var(--focus);
+  }
+  .login button.primary { align-self: flex-start; padding: 6px 16px; }
+  .login .err { margin-top: 0; }
+
+  .head-right { display: flex; align-items: center; gap: 12px; }
+
+  .linkbtn {
+    padding: 2px 6px;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    background: transparent;
+    color: var(--faint);
+    font: 11px/1.4 ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    cursor: pointer;
+  }
+  .linkbtn:hover { color: var(--text); border-color: var(--line); }
+  .linkbtn:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+
+  /* ---- flash -------------------------------------------------------- */
+
+  .flash {
+    margin: 10px 0 0;
+    padding: 7px 10px;
+    border: 1px solid var(--line);
+    border-left: 2px solid var(--live);
+    border-radius: 3px;
+    background: var(--surface);
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .flash .mono { color: var(--text); }
+  .flash[data-kind="reused"] { border-left-color: var(--warn); }
+
+  /* ---- add panel ---------------------------------------------------- */
+
+  #add { padding: 10px 0 2px; border-bottom: 1px solid var(--line); }
+
+  .toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 9px 4px 6px;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    background: var(--surface);
+    color: var(--muted);
+    font: 12px/1 -apple-system, system-ui, sans-serif;
+    cursor: pointer;
+  }
+  .toggle:hover { color: var(--text); border-color: var(--wire); }
+  .toggle:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+  .toggle .plus {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    font-size: 14px;
+    line-height: 1;
+  }
+  .toggle[aria-expanded="true"] { background: var(--sunken); color: var(--text); }
+
+  .form { padding: 12px 0 4px; }
+
+  .seg {
+    display: inline-flex;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    overflow: hidden;
+    background: var(--surface);
+  }
+  .seg label { position: relative; display: block; }
+  .seg input {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    margin: 0;
+    opacity: 0;
+    cursor: pointer;
+  }
+  .seg span {
+    display: block;
+    padding: 5px 11px;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    font-size: 12px;
+    color: var(--muted);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .seg input:checked + span {
+    background: var(--base);
+    color: var(--text);
+    box-shadow: inset 0 -2px 0 var(--focus);
+  }
+  .seg input:focus-visible + span { outline: 2px solid var(--focus); outline-offset: -2px; }
+
+  .hint {
+    margin: 9px 0 0;
+    max-width: 52ch;
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .fields {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 9px 10px;
+    margin-top: 11px;
+  }
+
+  .f { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .f > span {
+    font-size: 11px;
+    color: var(--faint);
+    letter-spacing: 0.01em;
+  }
+  .f > span em { font-style: normal; color: var(--wire); }
+
+  input[type="text"] {
+    padding: 5px 7px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    background: var(--base);
+    color: var(--text);
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    font-size: 12.5px;
+  }
+  input[type="text"]:focus-visible { outline: 2px solid var(--focus); outline-offset: -1px; border-color: var(--focus); }
+  input[type="text"]::placeholder { color: var(--wire); }
+
+  .f-host  input { width: 11ch; }
+  .f-port  input { width: 8ch; }
+  .f-label input { width: 12ch; }
+  .f-ttl   input { width: 8ch; }
+
+  /* Field order mirrors the row: the machine the service lives on comes first. */
+  .f-host { order: 1; }
+  .f-remote { order: 2; }
+  .f-local  { order: 3; }
+  .f-label  { order: 4; }
+  .f-ttl    { order: 5; }
+  .form[data-dir="remote-forward"] .f-local  { order: 2; }
+  .form[data-dir="remote-forward"] .f-remote { order: 3; }
+
+  .check {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 11px;
+    font-size: 12px;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .check input { margin: 0; cursor: pointer; }
+  .check.off { color: var(--wire); cursor: default; }
+  .check.off input { cursor: default; }
+
+  .actions { display: flex; align-items: center; gap: 8px; margin-top: 13px; }
+
+  button.primary, button.ghost {
+    padding: 5px 12px;
+    border-radius: 4px;
+    font: 12px/1.4 -apple-system, system-ui, sans-serif;
+    cursor: pointer;
+  }
+  button.primary {
+    border: 1px solid var(--focus);
+    background: var(--focus);
+    color: var(--base);
+  }
+  button.primary:hover { filter: brightness(1.08); }
+  button.ghost {
+    border: 1px solid var(--line);
+    background: transparent;
+    color: var(--muted);
+  }
+  button.ghost:hover { color: var(--text); border-color: var(--wire); }
+  button.primary:focus-visible, button.ghost:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+  .err {
+    margin: 10px 0 0;
+    padding: 6px 9px;
+    border-left: 2px solid var(--dead);
+    background: var(--surface);
+    border-radius: 0 3px 3px 0;
+    font-size: 12px;
+    color: var(--dead);
+    max-width: 52ch;
+  }
+
+  /* ---- entries ------------------------------------------------------ */
+
+  #list { list-style: none; margin: 0; padding: 0; }
+
+  .entry {
+    position: relative;
+    padding: 13px 0 14px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+  @media (prefers-reduced-motion: no-preference) {
+    .entry.enter { animation: fade .28s ease-out; }
+  }
+
+  /* line 1 — the cable. Source endpoint left, destination right, arrow always
+     pointing right: the service lives on the left, and becomes reachable on the
+     right. That invariant is what makes direction readable at a glance. */
+  .cable {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    font-size: 13px;
+  }
+
+  .dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--live);
+    flex: none;
+  }
+  .entry[data-state="dead"] .dot {
+    background: transparent;
+    box-shadow: inset 0 0 0 1.5px var(--dead);
+  }
+
+  .ep {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-decoration: none;
+    color: var(--text);
+    border-bottom: 1px solid transparent;
+  }
+  /* the far end (the remote box) is tinted so the two machines stay
+     distinguishable even though their positions swap with direction */
+  .ep.far { color: var(--far); }
+  a.ep[href]:hover { color: var(--live); border-bottom-color: var(--live); }
+  a.ep:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 2px; }
+
+  /* The wire doubles as the lease gauge: the lit portion is the fraction of
+     TTL still remaining, so a tunnel visibly retracts as it expires. A forward
+     with no expiry is lit end to end. */
+  .run {
+    position: relative;
+    flex: 1 1 8px;
+    min-width: 6px;
+    height: 1px;
+    background: var(--wire);
+  }
+  .run-fill {
+    position: absolute;
+    inset: 0 auto 0 0;
+    height: 1px;
+    background: var(--live);
+  }
+  .entry[data-state="dead"] .run-fill { background: transparent; }
+
+  .arrow { flex: none; color: var(--wire); margin-left: -6px; }
+
+  .entry[data-state="dead"] .ep {
+    color: var(--faint);
+    text-decoration: line-through;
+    text-decoration-thickness: 1px;
+  }
+  .entry[data-state="dead"] a.ep[href]:hover { color: var(--dead); border-bottom-color: transparent; }
+
+  .rowbtn {
+    flex: none;
+    width: 22px; height: 22px;
+    /* negative block margins keep the 22px hit target from padding the 13px
+       line; horizontal must stay 0 or the button overflows the container */
+    margin: -4px 0 -4px 2px;
+    padding: 0;
+    border: 0;
+    border-radius: 3px;
+    background: transparent;
+    color: var(--faint);
+    font: 15px/1 -apple-system, system-ui, sans-serif;
+    cursor: pointer;
+  }
+  .rowbtn.edit { display: inline-flex; align-items: center; justify-content: center; }
+  .rowbtn.edit svg { display: block; flex: none; }
+  .rowbtn:hover { background: var(--surface); color: var(--text); }
+  .rowbtn.close:hover { color: var(--dead); }
+  .rowbtn:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+
+  /* line 2 — meta */
+  .meta {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 4px;
+    padding-left: 16px;
+    font-size: 12px;
+    color: var(--muted);
+    min-height: 18px;
+  }
+
+  .who { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+
+  .dir {
+    flex: none;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    font-size: 10.5px;
+    color: var(--faint);
+  }
+  .entry[data-dir="remote-forward"] .dir { color: var(--far); }
+
+  .label {
+    color: var(--accent);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .requester { color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .times {
+    flex: none;
+    display: flex;
+    gap: 12px;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 11px;
+  }
+  .age    { color: var(--faint); }
+  .expiry { color: var(--muted); }
+  .expiry[data-soon="1"] { color: var(--warn); }
+  .entry[data-state="dead"] .label,
+  .entry[data-state="dead"] .expiry { color: var(--faint); }
+
+  /* inline edit panel. Deliberately not `.edit`: the row's edit BUTTON carries
+     that class, and a bare `.edit` rule paints this panel's border and background
+     onto the button. */
+  .edit-panel {
+    margin: 10px 0 2px;
+    padding: 10px 11px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 5px;
+  }
+  .edit-panel .fields { margin-top: 0; }
+  .edit-panel .actions { margin-top: 11px; }
+
+  /* ---- states ------------------------------------------------------- */
+
+  .notice {
+    padding: 28px 0 8px;
+    max-width: 46ch;
+  }
+  .notice p { margin: 0 0 8px; }
+  .notice p:last-child { margin-bottom: 0; color: var(--muted); }
+  .notice.down p:first-child { color: var(--dead); }
+  .notice button.ghost { margin-top: 4px; }
+
+  code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    font-size: 12px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 1px 5px;
+    color: var(--text);
+  }
+
+  .hidden { display: none; }
+
+  @media (max-width: 430px) {
+    body { padding: 20px 16px 32px; }
+    .cable { font-size: 12px; gap: 7px; }
+    .meta { padding-left: 14px; }
+    .requester { display: none; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <section id="login" class="login hidden">
+    <h1>local-gateway</h1>
+    <p class="login-note">Enter the admin password to manage port mappings.</p>
+    <form id="login-form" autocomplete="on">
+      <label class="f">
+        <span>password</span>
+        <input type="password" id="login-pw" name="password"
+               autocomplete="current-password" spellcheck="false" required>
+      </label>
+      <button type="submit" class="primary">Unlock</button>
+      <p class="err hidden" id="login-err" role="alert"></p>
+    </form>
+  </section>
+
+  <div id="app" class="hidden">
+  <header>
+    <h1>local-gateway</h1>
+    <div class="head-right">
+      <div id="summary" data-link="up">
+        <span id="link-dot"></span>
+        <span id="summary-text">connecting</span>
+      </div>
+      <button type="button" class="linkbtn" id="logout" title="End this admin session">lock</button>
+    </div>
+  </header>
+
+  <p id="flash" class="flash hidden" role="status" aria-live="polite"></p>
+
+  <section id="add">
+    <button type="button" id="add-toggle" class="toggle" aria-expanded="false" aria-controls="add-form">
+      <span class="plus" aria-hidden="true">+</span><span>Add mapping</span>
+    </button>
+
+    <form id="add-form" class="form hidden" data-dir="local-forward">
+      <div class="seg" role="group" aria-label="Direction">
+        <label>
+          <input type="radio" name="direction" value="local-forward" checked>
+          <span>local-forward</span>
+        </label>
+        <label>
+          <input type="radio" name="direction" value="remote-forward">
+          <span>remote-forward</span>
+        </label>
+      </div>
+
+      <p class="hint" id="dir-hint"></p>
+
+      <div class="fields">
+        <label class="f f-host">
+          <span>host</span>
+          <input type="text" name="host" value="code" autocomplete="off" spellcheck="false">
+        </label>
+        <label class="f f-port f-remote">
+          <span id="lab-remote">remote port</span>
+          <input type="text" name="remote_port" inputmode="numeric" autocomplete="off" placeholder="8530">
+        </label>
+        <label class="f f-port f-local">
+          <span id="lab-local">local port</span>
+          <input type="text" name="local_port" inputmode="numeric" autocomplete="off" placeholder="same">
+        </label>
+        <label class="f f-label">
+          <span>label <em>optional</em></span>
+          <input type="text" name="label" autocomplete="off" placeholder="mkdp">
+        </label>
+        <label class="f f-ttl">
+          <span>ttl <em>secs</em></span>
+          <input type="text" name="ttl" inputmode="numeric" autocomplete="off" placeholder="8h">
+        </label>
+      </div>
+
+      <label class="check" id="open-wrap">
+        <input type="checkbox" name="open">
+        <span id="open-text">open in browser</span>
+      </label>
+
+      <div class="actions">
+        <button type="submit" class="primary">Add mapping</button>
+        <button type="button" class="ghost" id="add-cancel">Cancel</button>
+      </div>
+
+      <p class="err hidden" id="add-err" role="alert"></p>
+    </form>
+  </section>
+
+  <ul id="list"></ul>
+
+  <div id="empty" class="notice hidden">
+    <p>No mappings yet.</p>
+    <p>Add one here, or run <code>expose 8530</code> on the remote host.</p>
+    <button type="button" class="ghost" id="empty-add">Add mapping</button>
+  </div>
+
+  <div id="down" class="notice down hidden">
+    <p>The gateway daemon isn't answering.</p>
+    <p>Start <code>gatewayd</code> — this page reconnects on its own.</p>
+  </div>
+  </div>
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  var POLL_MS = 3000;
+  var LOCAL_FWD = "local-forward";
+  var REMOTE_FWD = "remote-forward";
+
+  var API = "/admin";
+
+  var loginEl   = document.getElementById("login");
+  var loginForm = document.getElementById("login-form");
+  var loginPw   = document.getElementById("login-pw");
+  var loginErr  = document.getElementById("login-err");
+  var appEl     = document.getElementById("app");
+  var logoutBtn = document.getElementById("logout");
+
+  var listEl    = document.getElementById("list");
+  var emptyEl   = document.getElementById("empty");
+  var downEl    = document.getElementById("down");
+  var summaryEl = document.getElementById("summary");
+  var summaryTx = document.getElementById("summary-text");
+  var flashEl   = document.getElementById("flash");
+
+  var addToggle = document.getElementById("add-toggle");
+  var addForm   = document.getElementById("add-form");
+  var addErr    = document.getElementById("add-err");
+  var addCancel = document.getElementById("add-cancel");
+  var emptyAdd  = document.getElementById("empty-add");
+  var dirHint   = document.getElementById("dir-hint");
+  var labRemote = document.getElementById("lab-remote");
+  var labLocal  = document.getElementById("lab-local");
+  var openWrap  = document.getElementById("open-wrap");
+  var openBox   = addForm.elements["open"];
+
+  var rowsByKey = new Map();
+  var timer = null, flashTimer = null;
+
+  /* ---- helpers ------------------------------------------------------ */
+
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+
+  function num(v) {
+    return typeof v === "number" && isFinite(v) ? v : null;
+  }
+
+  // Drawn rather than typed: the pencil glyphs (U+270E, U+270F) are missing from the
+  // macOS system sans stack and render as a tofu box.
+  function pencil() {
+    var NS = "http://www.w3.org/2000/svg";
+    var svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("viewBox", "0 0 16 16");
+    svg.setAttribute("width", "12");
+    svg.setAttribute("height", "12");
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("focusable", "false");
+    var p = document.createElementNS(NS, "path");
+    p.setAttribute("d", "M11.6 1.6a1.4 1.4 0 0 1 2 2l-.9.9-2-2 .9-.9ZM9.8 3.4l2 2L5 12.2l-2.6.6.6-2.6 6.8-6.8Z");
+    p.setAttribute("fill", "currentColor");
+    svg.appendChild(p);
+    return svg;
+  }
+
+  function dirOf(r) {
+    return (r && r.direction === REMOTE_FWD) ? REMOTE_FWD : LOCAL_FWD;
+  }
+
+  function hostOf(r) {
+    return (r && r.host != null) ? String(r.host) : "remote";
+  }
+
+  // The daemon sends `id`; compute the documented shape if an older build omits it.
+  function keyOf(r) {
+    if (r && typeof r.id === "string" && r.id) return r.id;
+    var rp = (r && r.remote_port != null) ? String(r.remote_port) : "?";
+    return hostOf(r) + ":" + dirOf(r) + ":" + rp;
+  }
+
+  // Colons are legal in a path segment, and the daemon splits the id on them.
+  // Percent-encoding them would break a handler that reads the raw path, so keep
+  // them literal while still escaping anything genuinely unsafe.
+  function idPath(id) {
+    return encodeURIComponent(id).replace(/%3A/gi, ":");
+  }
+
+  // 45s -> "45s", 254s -> "4m", 8100s -> "2h 15m", 270000s -> "3d 3h"
+  function duration(s) {
+    if (s == null) return "";
+    s = Math.max(0, Math.floor(s));
+    if (s < 60) return s + "s";
+    if (s < 3600) return Math.floor(s / 60) + "m";
+    if (s < 86400) {
+      var h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+      return m ? h + "h " + m + "m" : h + "h";
+    }
+    var d = Math.floor(s / 86400), rh = Math.floor((s % 86400) / 3600);
+    return rh ? d + "d " + rh + "h" : d + "d";
+  }
+
+  function portValue(v) {
+    if (!/^\d+$/.test(v)) return null;
+    var n = parseInt(v, 10);
+    return (n >= 1024 && n <= 65535) ? n : null;
+  }
+
+  // Never trust an address that arrived from a remote host: only a loopback http
+  // URL may become an href. A remote-forward's listener lives on the remote box,
+  // so it has no Mac-side address and must not get a link at all.
+  function safeUrl(r) {
+    var raw = typeof r.url === "string" ? r.url : "";
+    if (/^http:\/\/(127\.0\.0\.1|localhost):\d+(\/|$)/.test(raw)) return raw;
+    if (dirOf(r) === LOCAL_FWD) {
+      var port = num(r.local_port);
+      if (port != null) return "http://127.0.0.1:" + port;
+    }
+    return null;
+  }
+
+  // The session cookie is HttpOnly, so it is never readable here; same-origin fetch
+  // attaches it on its own. A 401 is therefore the only signal that the session is
+  // gone, and it always means "show the login view", never "render an empty table".
+  function api(method, path, body) {
+    var opts = {
+      method: method,
+      credentials: "same-origin",
+      headers: { "Accept": "application/json" }
+    };
+    if (body) {
+      opts.headers["Content-Type"] = "application/json";
+      opts.body = JSON.stringify(body);
+    }
+    return fetch(path, opts).then(function (res) {
+      return res.text().then(function (txt) {
+        var data = null;
+        try { data = txt ? JSON.parse(txt) : null; } catch (e) { data = null; }
+        if (res.status === 401) {
+          showLogin();
+          var authErr = new Error("session expired");
+          authErr.auth = true;
+          throw authErr;
+        }
+        if (!res.ok) {
+          var msg = (data && typeof data.error === "string" && data.error)
+            ? data.error
+            : "HTTP " + res.status;
+          throw new Error(msg);
+        }
+        return data;
+      });
+    });
+  }
+
+  /* ---- auth --------------------------------------------------------- */
+
+  function showLogin() {
+    if (timer) { clearTimeout(timer); timer = null; }
+    rowsByKey.forEach(function (refs) { refs.li.remove(); });
+    rowsByKey.clear();
+    appEl.classList.add("hidden");
+    loginEl.classList.remove("hidden");
+    flashEl.classList.add("hidden");
+    loginPw.focus();
+  }
+
+  function showApp() {
+    loginEl.classList.add("hidden");
+    appEl.classList.remove("hidden");
+    clearErr(loginErr);
+  }
+
+  loginForm.addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    clearErr(loginErr);
+
+    // Straight from the field into the request body, and cleared immediately. It is
+    // never held in a variable that outlives this call, never stored, never in a URL.
+    var body = JSON.stringify({ password: loginPw.value });
+    loginPw.value = "";
+
+    fetch(API + "/login", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      body: body
+    }).then(function (res) {
+      return res.text().then(function (txt) {
+        var data = null;
+        try { data = txt ? JSON.parse(txt) : null; } catch (e) { data = null; }
+        if (!res.ok) {
+          throw new Error((data && typeof data.error === "string" && data.error)
+            ? data.error
+            : "That password was not accepted.");
+        }
+        return data;
+      });
+    }).then(function () {
+      showApp();
+      schedule(true);
+    }).catch(function (err) {
+      showErr(loginErr, err && err.message ? err.message : "Could not sign in.");
+      loginPw.focus();
+    });
+  });
+
+  logoutBtn.addEventListener("click", function () {
+    fetch(API + "/logout", { method: "POST", credentials: "same-origin" })
+      .catch(function () { /* the session is being dropped either way */ })
+      .then(function () { showLogin(); });
+  });
+
+  function showErr(node, message) {
+    node.textContent = message;
+    node.classList.remove("hidden");
+  }
+
+  function clearErr(node) {
+    node.textContent = "";
+    node.classList.add("hidden");
+  }
+
+  function flash(kind, parts) {
+    flashEl.textContent = "";
+    parts.forEach(function (p) {
+      flashEl.appendChild(typeof p === "string" ? document.createTextNode(p) : p);
+    });
+    flashEl.dataset.kind = kind;
+    flashEl.classList.remove("hidden");
+    if (flashTimer) clearTimeout(flashTimer);
+    flashTimer = setTimeout(function () { flashEl.classList.add("hidden"); }, 6000);
+  }
+
+  /* ---- add form ----------------------------------------------------- */
+
+  function currentDir() {
+    return addForm.elements["direction"].value === REMOTE_FWD ? REMOTE_FWD : LOCAL_FWD;
+  }
+
+  function syncDir() {
+    var dir = currentDir();
+    addForm.dataset.dir = dir;
+
+    if (dir === LOCAL_FWD) {
+      dirHint.textContent =
+        "Reach a service running on the remote host from this Mac. " +
+        "Leave the local port blank to mirror the remote port when it is free.";
+      labRemote.textContent = "remote port";
+      labLocal.textContent = "local port";
+      addForm.elements["local_port"].placeholder = "same";
+      openWrap.classList.remove("off");
+      openBox.disabled = false;
+    } else {
+      dirHint.textContent =
+        "Let the remote host reach a service running on this Mac. " +
+        "Both ports are required.";
+      labRemote.textContent = "remote port";
+      labLocal.textContent = "local port";
+      addForm.elements["local_port"].placeholder = "3000";
+      // Nothing to open here: the listener ends up on the remote host.
+      openWrap.classList.add("off");
+      openBox.checked = false;
+      openBox.disabled = true;
+    }
+  }
+
+  function openAdd() {
+    addForm.classList.remove("hidden");
+    addToggle.setAttribute("aria-expanded", "true");
+    var first = addForm.elements["remote_port"];
+    if (currentDir() === REMOTE_FWD) first = addForm.elements["local_port"];
+    first.focus();
+  }
+
+  function closeAdd() {
+    addForm.classList.add("hidden");
+    addToggle.setAttribute("aria-expanded", "false");
+    clearErr(addErr);
+  }
+
+  addToggle.addEventListener("click", function () {
+    if (addForm.classList.contains("hidden")) openAdd();
+    else closeAdd();
+  });
+  addCancel.addEventListener("click", closeAdd);
+  emptyAdd.addEventListener("click", openAdd);
+
+  Array.prototype.forEach.call(addForm.elements["direction"], function (radio) {
+    radio.addEventListener("change", syncDir);
+  });
+
+  addForm.addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    clearErr(addErr);
+
+    var dir = currentDir();
+    var host = addForm.elements["host"].value.trim();
+    var rawRemote = addForm.elements["remote_port"].value.trim();
+    var rawLocal = addForm.elements["local_port"].value.trim();
+    var rawTtl = addForm.elements["ttl"].value.trim();
+
+    if (!host) { showErr(addErr, "A host is required."); return; }
+
+    var remotePort = portValue(rawRemote);
+    if (remotePort == null) {
+      showErr(addErr, "Remote port must be a whole number between 1024 and 65535.");
+      return;
+    }
+
+    var body = {
+      direction: dir,
+      host: host,
+      remote_port: remotePort,
+      label: addForm.elements["label"].value.trim(),
+      open: !openBox.disabled && openBox.checked,
+      requester: "console"
+    };
+
+    if (rawLocal) {
+      var localPort = portValue(rawLocal);
+      if (localPort == null) {
+        showErr(addErr, "Local port must be a whole number between 1024 and 65535.");
+        return;
+      }
+      body.local_port = localPort;
+    } else if (dir === REMOTE_FWD) {
+      showErr(addErr, "A remote-forward needs the local port of the service to publish.");
+      return;
+    }
+
+    if (rawTtl) {
+      if (!/^\d+$/.test(rawTtl)) { showErr(addErr, "TTL must be a whole number of seconds."); return; }
+      body.ttl = parseInt(rawTtl, 10);
+    }
+
+    api("POST", API + "/forward", body).then(function (res) {
+      res = res || {};
+      var rdir = res.direction === REMOTE_FWD ? REMOTE_FWD : dir;
+      var rlocal = num(res.local_port);
+      var rremote = num(res.remote_port);
+      if (rremote == null) rremote = remotePort;
+
+      var left  = el("span", "mono", endpointText(rdir, "src", host, rremote, rlocal));
+      var right = el("span", "mono", endpointText(rdir, "dst", host, rremote, rlocal));
+
+      flash(res.reused ? "reused" : "added",
+        res.reused
+          ? ["Already mapped — reusing ", left, " → ", right, "."]
+          : ["Mapped ", left, " → ", right, "."]);
+
+      addForm.reset();
+      syncDir();
+      closeAdd();
+      schedule(true);
+    }).catch(function (err) {
+      if (err && err.auth) return; // the login view is already up
+      showErr(addErr, err && err.message ? err.message : "The daemon rejected that mapping.");
+    });
+  });
+
+  // Which machine sits on which side, given a direction.
+  function endpointText(dir, side, host, remotePort, localPort) {
+    var remoteTx = host + ":" + (remotePort != null ? remotePort : "?");
+    var localTx = "127.0.0.1:" + (localPort != null ? localPort : "?");
+    if (dir === REMOTE_FWD) return side === "src" ? localTx : remoteTx;
+    return side === "src" ? remoteTx : localTx;
+  }
+
+  /* ---- rows --------------------------------------------------------- */
+
+  function buildRow() {
+    var li = el("li", "entry");
+
+    var cable = el("div", "cable");
+    var dot = el("span", "dot");
+    var src = el("span", "ep");
+    var run = el("span", "run");
+    var runFill = el("span", "run-fill");
+    run.appendChild(runFill);
+    var arrow = el("span", "arrow", "→");
+    var dst = document.createElement("a");
+    dst.className = "ep";
+    dst.target = "_blank";
+    dst.rel = "noopener noreferrer";
+    var edit = el("button", "rowbtn edit");
+    edit.type = "button";
+    edit.appendChild(pencil());
+    var close = el("button", "rowbtn close", "×");
+    close.type = "button";
+
+    cable.append(dot, src, run, arrow, dst, edit, close);
+
+    var meta = el("div", "meta");
+    var who = el("div", "who");
+    var dir = el("span", "dir");
+    var label = el("span", "label");
+    var requester = el("span", "requester");
+    who.append(dir, label, requester);
+    var times = el("div", "times");
+    var age = el("span", "age");
+    var expiry = el("span", "expiry");
+    times.append(age, expiry);
+    meta.append(who, times);
+
+    li.append(cable, meta);
+
+    var refs = {
+      li: li, dot: dot, src: src, dst: dst, arrow: arrow, edit: edit, close: close,
+      dir: dir, label: label, requester: requester, age: age, expiry: expiry,
+      runFill: runFill, editForm: null
+    };
+
+    close.addEventListener("click", function () { removeForward(refs); });
+    edit.addEventListener("click", function () {
+      if (refs.editForm) closeEdit(refs);
+      else openEdit(refs);
+    });
+    return refs;
+  }
+
+  function paintRow(refs, r) {
+    refs.data = r;
+
+    var dead = r.state === "dead";
+    var dir = dirOf(r);
+    refs.li.dataset.state = dead ? "dead" : "alive";
+    refs.li.dataset.dir = dir;
+
+    var host = hostOf(r);
+    var rport = num(r.remote_port);
+    var lport = num(r.local_port);
+
+    refs.src.textContent = endpointText(dir, "src", host, rport, lport);
+    refs.dst.textContent = endpointText(dir, "dst", host, rport, lport);
+
+    // Tint whichever side is the remote box, so the two machines stay
+    // distinguishable even though they swap position with direction.
+    refs.src.classList.toggle("far", dir === LOCAL_FWD);
+    refs.dst.classList.toggle("far", dir === REMOTE_FWD);
+
+    var href = safeUrl(r);
+    if (href) {
+      refs.dst.href = href;
+      refs.dst.title = "Open " + href;
+    } else {
+      refs.dst.removeAttribute("href");
+      refs.dst.removeAttribute("title");
+    }
+
+    refs.dir.textContent = dir;
+    refs.edit.setAttribute("aria-label", "Edit mapping " + keyOf(r));
+    refs.edit.title = "Edit this mapping";
+    refs.close.setAttribute("aria-label", "Delete mapping " + keyOf(r));
+    refs.close.title = "Delete this mapping";
+
+    refs.label.textContent = r.label ? String(r.label) : "";
+    refs.requester.textContent = r.requester ? String(r.requester) : "";
+
+    var age = num(r.age);
+    refs.age.textContent = age != null ? duration(age) + " old" : "";
+    refs.age.title = age != null ? "Forwarded " + duration(age) + " ago" : "";
+
+    var ttl = num(r.ttl), left = num(r.expires_in);
+    if (ttl === 0) {
+      refs.expiry.textContent = "—";
+      refs.expiry.title = "No expiry";
+      refs.expiry.removeAttribute("data-soon");
+      refs.runFill.style.width = dead ? "0" : "100%";
+    } else if (ttl != null && ttl > 0 && left != null) {
+      refs.expiry.textContent = duration(left) + " left";
+      refs.expiry.title = "Expires in " + duration(left);
+      // A dead forward is already gone; counting it down would contradict that.
+      if (left < 900 && !dead) refs.expiry.dataset.soon = "1";
+      else refs.expiry.removeAttribute("data-soon");
+      var frac = Math.max(0, Math.min(1, left / ttl));
+      refs.runFill.style.width = dead ? "0" : (frac * 100).toFixed(2) + "%";
+    } else {
+      refs.expiry.textContent = "";
+      refs.expiry.title = "";
+      refs.expiry.removeAttribute("data-soon");
+      refs.runFill.style.width = dead ? "0" : "100%";
+    }
+  }
+
+  /* ---- edit / delete ------------------------------------------------ */
+
+  function field(cls, labelText, value) {
+    var wrap = el("label", "f " + cls);
+    wrap.appendChild(el("span", null, labelText));
+    var input = document.createElement("input");
+    input.type = "text";
+    input.autocomplete = "off";
+    input.value = value != null ? String(value) : "";
+    wrap.appendChild(input);
+    return { wrap: wrap, input: input };
+  }
+
+  function openEdit(refs) {
+    if (refs.editForm) return;
+    var r = refs.data || {};
+
+    var form = document.createElement("form");
+    form.className = "edit-panel";
+
+    var fields = el("div", "fields");
+    var fLabel  = field("f-label", "label", r.label || "");
+    var fTtl    = field("f-ttl", "ttl secs", num(r.ttl) != null ? r.ttl : "");
+    var fLocal  = field("f-port", "local port", num(r.local_port));
+    var fRemote = field("f-port", "remote port", num(r.remote_port));
+    fields.append(fLabel.wrap, fTtl.wrap, fLocal.wrap, fRemote.wrap);
+
+    var actions = el("div", "actions");
+    var save = el("button", "primary", "Save");
+    save.type = "submit";
+    var cancel = el("button", "ghost", "Cancel");
+    cancel.type = "button";
+    actions.append(save, cancel);
+
+    var err = el("p", "err hidden");
+    err.setAttribute("role", "alert");
+
+    form.append(fields, actions, err);
+    refs.li.appendChild(form);
+    refs.editForm = form;
+    refs.edit.setAttribute("aria-expanded", "true");
+    fLabel.input.focus();
+
+    cancel.addEventListener("click", function () { closeEdit(refs); });
+
+    form.addEventListener("submit", function (ev) {
+      ev.preventDefault();
+      clearErr(err);
+
+      var cur = refs.data || {};
+      var patch = {};
+
+      var newLabel = fLabel.input.value.trim();
+      if (newLabel !== (cur.label || "")) patch.label = newLabel;
+
+      var rawTtl = fTtl.input.value.trim();
+      if (rawTtl) {
+        if (!/^\d+$/.test(rawTtl)) { showErr(err, "TTL must be a whole number of seconds."); return; }
+        var ttl = parseInt(rawTtl, 10);
+        if (ttl !== num(cur.ttl)) patch.ttl = ttl;
+      }
+
+      var rawLocal = fLocal.input.value.trim();
+      if (rawLocal) {
+        var lp = portValue(rawLocal);
+        if (lp == null) { showErr(err, "Local port must be between 1024 and 65535."); return; }
+        if (lp !== num(cur.local_port)) patch.local_port = lp;
+      }
+
+      var rawRemote = fRemote.input.value.trim();
+      if (rawRemote) {
+        var rp = portValue(rawRemote);
+        if (rp == null) { showErr(err, "Remote port must be between 1024 and 65535."); return; }
+        if (rp !== num(cur.remote_port)) patch.remote_port = rp;
+      }
+
+      if (!Object.keys(patch).length) { closeEdit(refs); return; }
+
+      api("PATCH", API + "/forward/" + idPath(keyOf(cur)), patch).then(function () {
+        closeEdit(refs);
+        schedule(true);
+      }).catch(function (e) {
+        if (e && e.auth) return;
+        showErr(err, e && e.message ? e.message : "The daemon rejected that change.");
+      });
+    });
+  }
+
+  function closeEdit(refs) {
+    if (!refs.editForm) return;
+    refs.editForm.remove();
+    refs.editForm = null;
+    refs.edit.removeAttribute("aria-expanded");
+  }
+
+  function removeForward(refs) {
+    var r = refs.data;
+    if (!r) return;
+    refs.close.disabled = true;
+    api("DELETE", API + "/forward/" + idPath(keyOf(r)))
+      .catch(function (err) {
+        if (err && err.auth) return;
+        flash("error", [err && err.message ? err.message : "Could not close that mapping."]);
+      })
+      .then(function () {
+        refs.close.disabled = false;
+        schedule(true);
+      });
+  }
+
+  /* ---- render ------------------------------------------------------- */
+
+  function render(rows) {
+    var seen = new Set();
+    var keys = [];
+
+    rows.forEach(function (r, i) {
+      var k = keyOf(r);
+      if (seen.has(k)) k = k + "#" + i;
+      seen.add(k);
+      keys.push(k);
+
+      var refs = rowsByKey.get(k);
+      if (!refs) {
+        refs = buildRow();
+        rowsByKey.set(k, refs);
+        listEl.appendChild(refs.li);
+        refs.li.classList.add("enter");
+        // Not animationend: under reduced motion the animation never runs and
+        // the event would never fire, leaving the class stuck on every row.
+        setTimeout(function () { refs.li.classList.remove("enter"); }, 400);
+      }
+      paintRow(refs, r);
+    });
+
+    rowsByKey.forEach(function (refs, k) {
+      if (!seen.has(k)) {
+        refs.li.remove();
+        rowsByKey.delete(k);
+      }
+    });
+
+    // keep DOM order matching payload order without rebuilding rows
+    keys.forEach(function (k, i) {
+      var refs = rowsByKey.get(k);
+      if (refs && listEl.children[i] !== refs.li) listEl.appendChild(refs.li);
+    });
+
+    var live = rows.filter(function (r) { return r.state !== "dead"; }).length;
+    var dead = rows.length - live;
+    summaryEl.dataset.link = "up";
+    summaryTx.textContent = rows.length === 0
+      ? "connected"
+      : live + (live === 1 ? " mapping" : " mappings") +
+        (dead ? ", " + dead + " dead" : "");
+
+    emptyEl.classList.toggle("hidden", rows.length !== 0);
+    downEl.classList.add("hidden");
+  }
+
+  function renderDown() {
+    rowsByKey.forEach(function (refs) { refs.li.remove(); });
+    rowsByKey.clear();
+    summaryEl.dataset.link = "down";
+    summaryTx.textContent = "not connected";
+    emptyEl.classList.add("hidden");
+    downEl.classList.remove("hidden");
+  }
+
+  function poll() {
+    // Relative path on purpose: the page works whatever port the daemon binds.
+    return fetch(API + "/forwards", {
+      credentials: "same-origin",
+      headers: { "Accept": "application/json" }
+    })
+      .then(function (res) {
+        // 401 is not "the daemon is down": the daemon answered, the session did not.
+        if (res.status === 401) { showLogin(); return null; }
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return res.json();
+      })
+      .then(function (data) {
+        if (data === null) return;
+        render(Array.isArray(data) ? data : []);
+      })
+      .catch(function () { renderDown(); });
+  }
+
+  function schedule(now) {
+    if (timer) clearTimeout(timer);
+    var run = function () { poll().then(function () { timer = setTimeout(run, POLL_MS); }); };
+    timer = setTimeout(run, now ? 0 : POLL_MS);
+  }
+
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "visible") schedule(true);
+  });
+
+  syncDir();
+  // Probe once to decide which view to show. poll() flips to the login view itself
+  // on 401, so a session that is already valid lands straight on the console.
+  poll().then(function () {
+    if (loginEl.classList.contains("hidden")) {
+      showApp();
+      schedule(false);
+    }
+  });
+})();
+</script>
+</body>
+</html>
