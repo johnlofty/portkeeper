@@ -41,12 +41,13 @@ func main() {
 	}
 
 	run := execRunner{}
-	masters := map[string]masterCtl{}
-	for _, h := range cfg.Hosts {
-		masters[h] = &sshMaster{cfg: cfg, host: h, run: run}
-	}
+	book := newHostBook(cfg, cfg.SSHConfigPath, cfg.HostsFile)
 
-	m := newManager(cfg, run, masters)
+	m := newManager(cfg, run, nil)
+	m.book = book
+	m.newMaster = func(host string) masterCtl {
+		return &sshMaster{cfg: cfg, host: host, run: run}
+	}
 	// Backgrounded: bringing up a master can block for seconds per host (longer if one
 	// is unreachable), and the control channel must not be dead while that happens.
 	go m.Start()
@@ -76,7 +77,7 @@ func main() {
 	}()
 
 	log.Printf("listening on %s, hosts %v (admin %s)",
-		cfg.Listen, cfg.Hosts, map[bool]string{true: "enabled", false: "disabled"}[cfg.adminEnabled()])
+		cfg.Listen, cfg.PublicHosts, map[bool]string{true: "enabled", false: "disabled"}[cfg.adminEnabled()])
 	if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
 		log.Printf("http: %v", err)
 	}

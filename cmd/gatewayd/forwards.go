@@ -193,6 +193,9 @@ type openReq struct {
 	ttl        time.Duration
 	requester  string
 	open       bool
+	// admin is set by the authenticated handler. It widens which hosts are reachable —
+	// never what the forward itself does.
+	admin bool
 }
 
 type editReq struct {
@@ -203,9 +206,15 @@ type editReq struct {
 }
 
 type manager struct {
-	cfg     *Config
-	run     runner
-	masters map[string]masterCtl
+	cfg  *Config
+	run  runner
+	book *hostBook
+
+	// newMaster builds a master for a host not seen before. Masters for public hosts are
+	// opened at startup because they carry the control channel; a host discovered from
+	// ssh_config is dialled only when someone actually forwards to it, since holding a
+	// connection open to every alias in an ssh config would be absurd.
+	newMaster func(host string) masterCtl
 
 	alive   func(int) bool
 	free    func(int) bool
@@ -214,12 +223,16 @@ type manager struct {
 	now     func() time.Time
 
 	mu      sync.Mutex
+	masters map[string]masterCtl
 	fwds    map[fwdKey]*forward
 	healthy map[string]bool
 	cycles  int
 }
 
 func newManager(cfg *Config, run runner, masters map[string]masterCtl) *manager {
+	if masters == nil {
+		masters = map[string]masterCtl{}
+	}
 	return &manager{
 		cfg:     cfg,
 		run:     run,
@@ -234,13 +247,91 @@ func newManager(cfg *Config, run runner, masters map[string]masterCtl) *manager 
 	}
 }
 
+// masterFor returns a host's master, building it on first use.
+func (m *manager) masterFor(host string) masterCtl {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if mc, ok := m.masters[host]; ok {
+		return mc
+	}
+	if m.newMaster == nil {
+		return nil
+	}
+	mc := m.newMaster(host)
+	m.masters[host] = mc
+	return mc
+}
+
+// liveMasters snapshots the hosts a master has actually been opened for, which is what
+// healing and shutdown must walk — not the config, which now only lists the public ones.
+func (m *manager) liveMasters() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]string, 0, len(m.masters))
+	for h := range m.masters {
+		out = append(out, h)
+	}
+	return out
+}
+
+// ensureUp brings a host's master up if this is the first forward to it. A public host is
+// already up from Start(); a discovered host is connected here, on demand.
+func (m *manager) ensureUp(host string) error {
+	mc := m.masterFor(host)
+	if mc == nil {
+		return fmt.Errorf("no ssh master available for %s", host)
+	}
+	if err := mc.check(); err == nil {
+		m.setHealthy(host, true)
+		return nil
+	}
+	mc.stop()
+	if err := mc.start(); err != nil {
+		return fmt.Errorf("could not open an ssh connection to %s: %w", host, err)
+	}
+	if err := waitReady(mc, 10*time.Second); err != nil {
+		return fmt.Errorf("ssh connection to %s did not come up: %w", host, err)
+	}
+	m.setHealthy(host, true)
+	logf("master %s: up", host)
+	return nil
+}
+
+// ensureControlChannel re-requests the RemoteForward the remote reaches us through.
+//
+// ssh_config already asks for it at connect time, but that bind FAILS whenever another
+// connection is holding the remote port — typically the user's own interactive session,
+// which carries the same RemoteForward line. ssh reports it as
+// "remote port forwarding failed for listen port N", which masterLog deliberately
+// filters as noise, because when someone else holds the port the tunnel still works.
+//
+// The trap is what happens next: that other session disconnects, the remote port falls
+// free, and nothing re-requests it. From the Mac everything looks healthy — our master is
+// up, our listener is up — while `expose` on the remote gets connection-refused. So ask
+// explicitly every time a master comes up, and ignore the error when it is already bound.
+func (m *manager) ensureControlChannel(host string) {
+	_, portStr, err := net.SplitHostPort(m.cfg.Listen)
+	if err != nil {
+		return
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return
+	}
+	// Same port on both ends: the remote reaches us at the address it would use locally.
+	m.run.run(m.cfg.argvForward(host, dirRemote, port, port))
+}
+
 // Start clears any master left by a previous daemon before opening a fresh one.
 // This is what makes in-memory state sound: an empty table alongside an empty master
 // is consistent by construction, and the daemon never inherits forwards that OpenSSH
 // would not let it enumerate or cancel.
 func (m *manager) Start() {
-	for _, h := range m.cfg.Hosts {
-		mc := m.masters[h]
+	for _, h := range m.cfg.PublicHosts {
+		mc := m.masterFor(h)
+		if mc == nil {
+			continue
+		}
 		mc.stop()
 		if err := mc.start(); err != nil {
 			logf("master %s: start failed: %v", h, err)
@@ -251,6 +342,7 @@ func (m *manager) Start() {
 			continue
 		}
 		m.setHealthy(h, true)
+		m.ensureControlChannel(h)
 		logf("master %s: up", h)
 	}
 }
@@ -296,7 +388,13 @@ func (m *manager) validate(r *openReq) error {
 	if !r.direction.valid() {
 		return errBadDirection
 	}
-	if !m.cfg.allows(r.host) {
+	if r.admin {
+		// An authenticated caller may reach anything the console offers: discovered in
+		// ssh_config, added by hand, or public.
+		if m.book == nil || !m.book.Known(r.host) {
+			return errUnknownHost
+		}
+	} else if !m.cfg.allows(r.host) {
 		return errUnknownHost
 	}
 
@@ -365,6 +463,12 @@ func (m *manager) Open(r openReq) (forwardView, bool, error) {
 		if err != nil {
 			return forwardView{}, false, fmt.Errorf("no local port available: %w", err)
 		}
+	}
+
+	// A discovered host has no master until now; a public one is already up and this is
+	// a cheap check. Either way the connection must exist before a forward can ride it.
+	if err := m.ensureUp(r.host); err != nil {
+		return forwardView{}, false, err
 	}
 
 	if err := m.install(r.host, r.direction, local, r.remotePort); err != nil {
@@ -533,10 +637,20 @@ func (m *manager) reconcile() {
 	checkRemote := m.cycles%remoteCheckEvery == 0
 	m.mu.Unlock()
 
-	for _, h := range m.cfg.Hosts {
-		mc := m.masters[h]
+	for _, h := range m.liveMasters() {
+		mc := m.masterFor(h)
+		if mc == nil {
+			continue
+		}
 		if err := mc.check(); err == nil {
 			m.setHealthy(h, true)
+			// Re-assert it even on a healthy master: the remote port can fall free at
+			// any time, when whoever else was holding it disconnects. The request is a
+			// local mux round trip and is idempotent, so asking every cycle is cheaper
+			// than discovering the control channel is dead from a user's failed expose.
+			if m.cfg.allows(h) {
+				m.ensureControlChannel(h)
+			}
 			continue
 		}
 		m.setHealthy(h, false)
@@ -551,6 +665,7 @@ func (m *manager) reconcile() {
 			continue
 		}
 		m.setHealthy(h, true)
+		m.ensureControlChannel(h)
 		m.replay(h)
 	}
 	m.reap(checkRemote)
@@ -671,7 +786,7 @@ func (m *manager) Shutdown() {
 	for _, f := range fs {
 		m.uninstall(f)
 	}
-	for _, h := range m.cfg.Hosts {
-		m.masters[h].stop()
+	for _, h := range m.liveMasters() {
+		m.masterFor(h).stop()
 	}
 }

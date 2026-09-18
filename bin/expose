@@ -29,10 +29,17 @@ LG_PORT="${LG_PORT:-9996}"
 LG_URL="${LG_URL:-http://127.0.0.1:${LG_PORT}}"
 LG_TIMEOUT="${LG_TIMEOUT:-5}"
 
-# The daemon resolves the target host from its own static allowlist -- what we
-# send is a hint, never trusted. So this only needs to be right, not safe.
-LG_KNOWN_HOSTS="${LG_KNOWN_HOSTS:-code}"
-LG_FALLBACK_HOST="${LG_FALLBACK_HOST:-code}"
+# Which host this box is, as the Mac's ssh config names it.
+#
+# Deliberately NOT guessed. This box's own hostname is not the alias: `hostname -s` here
+# reports "code-server" while the Mac's ssh config calls it "code", so matching one against
+# the other always fell through to a hardcoded default. With a single host that default
+# happened to be right; with several it would ask the Mac to forward a port on the WRONG
+# MACHINE and succeed, because the alias it named is a perfectly valid one.
+#
+# So send nothing unless something authoritative told us. The daemon fills in the only
+# public host it has, and says so plainly when there is more than one to choose from.
+LG_HOST_FILE="${LG_HOST_FILE:-$HOME/.config/local-gateway/host}"
 
 # The only direction this client can create. Remote-forwards are admin-only.
 DIRECTION="local-forward"
@@ -87,15 +94,18 @@ valid_port() {
   [ "$1" -ge 1024 ] && [ "$1" -le 65535 ]
 }
 
-default_host() {
-  vh_name="$(hostname -s 2>/dev/null || hostname 2>/dev/null)"
-  for vh_known in $LG_KNOWN_HOSTS; do
-    if [ "$vh_name" = "$vh_known" ]; then
-      printf '%s' "$vh_known"
-      return
-    fi
-  done
-  printf '%s' "$LG_FALLBACK_HOST"
+# Empty unless something authoritative said so. Never inferred from this box's hostname.
+configured_host() {
+  if [ -n "${LG_HOST:-}" ]; then
+    printf '%s' "$LG_HOST"
+    return
+  fi
+  [ -r "$LG_HOST_FILE" ] || return 0
+  ch_v="$(sed -n '1{s/^[[:space:]]*//;s/[[:space:]]*$//;p;}' "$LG_HOST_FILE" 2>/dev/null)"
+  case "$ch_v" in
+    '' | '#'*) ;;
+    *) printf '%s' "$ch_v" ;;
+  esac
 }
 
 # Sets rq_body and rq_code. Returns non-zero only when the daemon could not be
@@ -183,7 +193,8 @@ build_payload() {
       --arg l "$label" \
       --arg r "$requester" \
       --argjson t "${ttl:-null}" \
-      '{direction: $d, remote_port: $p, host: $h, label: $l, requester: $r}
+      '{direction: $d, remote_port: $p, label: $l, requester: $r}
+       + (if $h == "" then {} else {host: $h} end)
        + (if $t == null then {} else {ttl: $t} end)' 2>/dev/null)"
   fi
   if [ -z "$bp_out" ]; then
@@ -191,7 +202,8 @@ build_payload() {
     # a JSON string -- the fields that reach here are a label and a hostname.
     bp_label="$(printf '%s' "$label" | tr -d '\\"')"
     bp_requester="$(printf '%s' "$requester" | tr -d '\\"')"
-    bp_out="{\"direction\":\"$DIRECTION\",\"remote_port\":$port,\"host\":\"$host\""
+    bp_out="{\"direction\":\"$DIRECTION\",\"remote_port\":$port"
+    [ -n "$host" ] && bp_out="$bp_out,\"host\":\"$host\""
     bp_out="$bp_out,\"label\":\"$bp_label\",\"requester\":\"$bp_requester\""
     [ -n "${ttl:-}" ] && bp_out="$bp_out,\"ttl\":$ttl"
     bp_out="$bp_out}"
@@ -228,12 +240,19 @@ do_forward() {
 }
 
 # An id looks like `code:local-forward:8530`; a bare port never contains a colon.
-# Only DELETE /api/forward/{id} exists, so a bare port is expanded into the id it
-# must mean -- this client can only ever have made a local-forward.
+# A bare port is only expanded into an id when we actually know the host -- otherwise it
+# is sent as-is, and the daemon resolves it against the one public host it has. Building
+# ":local-forward:8530" out of an empty host would just be a malformed id.
 forward_id() {
   case "$1" in
     *:*) printf '%s' "$1" ;;
-    *) printf '%s:%s:%s' "$host" "$DIRECTION" "$1" ;;
+    *)
+      if [ -n "$host" ]; then
+        printf '%s:%s:%s' "$host" "$DIRECTION" "$1"
+      else
+        printf '%s' "$1"
+      fi
+      ;;
   esac
 }
 
@@ -324,7 +343,7 @@ port=""
 target=""
 label=""
 ttl=""
-host="${LG_HOST:-$(default_host)}"
+host="$(configured_host)"
 requester="${USER:-unknown}@$(hostname -s 2>/dev/null || echo remote):$PPID"
 
 [ $# -gt 0 ] || {

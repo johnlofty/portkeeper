@@ -549,3 +549,71 @@ mechanism.
   has no session, so the phase-1 mkdp payoff (preview on the remote pops a browser on the
   Mac) does not work. Either give hooks an admin path or exempt `open` on `/api` with the
   URL still server-constructed. Undecided.
+
+## Host discovery (2026-09-18)
+
+The console picks a host from a list rather than taking a typed string. Three sources feed
+it: `LG_HOSTS`, `~/.ssh/config`, and hosts added by hand in the console.
+
+**Discovery is not authorization.** This is the whole point. This machine's ssh config has
+15 connectable aliases — a router, a Pi, several portals, a GCP box. Letting discovery
+populate the allowlist would mean a process on the remote VM could ask the Mac to open a
+tunnel to any of them, because `/api` is unauthenticated by design. So:
+
+| Caller | May target |
+| ------ | ---------- |
+| `/admin` (you, authenticated) | anything the console lists: public, discovered or manual |
+| `/api` (anything on the remote VM) | `LG_HOSTS` only — unchanged |
+
+The console marks a host it can reach but `expose` cannot, so that difference shows up in
+the picker rather than as a 403 later.
+
+**Parsing.** `Host` lines only, with `HostName`/`User` for context and `Include` followed to
+a depth of 4. Patterns are skipped rather than listed: `Host *` is a matching rule, not a
+machine, and offering `*` as somewhere to forward to would be nonsense.
+
+**Aliases are validated, not escaped.** An alias becomes an argv element handed to ssh.
+argv already rules out a shell, but it does **not** stop ssh parsing its own flags, so
+`-oProxyCommand=...` as a "host" would be read as an option. Anything not matching
+`[A-Za-z0-9_][A-Za-z0-9_.-]*` is rejected at every entry point.
+
+**Masters are opened lazily, with one exception.** Holding an ssh connection to every alias
+in a config would be absurd, so a discovered host is dialled on first use. Public hosts stay
+eager: their master carries the `RemoteForward` the control channel arrives on, so it has to
+exist before anything out there calls in.
+
+**Manual hosts persist**, unlike forwards. That is not a contradiction of State above: a
+forward mirrors ssh's own internals and dies with the master, whereas a host someone typed
+is configuration and belongs in `~/.config/local-gateway/hosts`.
+
+## The control channel must be asserted, not assumed (2026-09-18)
+
+Found by `expose` failing with connection-refused while the Mac looked entirely healthy:
+the daemon was running, its master was up, and its listener was bound — but the remote had
+**no listener on 9996 at all**, so nothing out there could reach us.
+
+The cause is a race with the user's own shell. `ssh/config` carries
+`RemoteForward 9996 localhost:9996`, so *every* connection to that host asks for the same
+remote port — the daemon's master and the user's interactive session alike. Whichever
+connects second loses, and ssh reports it as
+`remote port forwarding failed for listen port 9996`, which `masterLog` deliberately
+filters as noise. That filtering is right when the other holder is a live session: the
+tunnel still works, and logging it every reconnect would be pure spam.
+
+The trap is what happens *next*. The interactive session disconnects, the remote port falls
+free, and nothing re-requests it. The daemon has no idea: from its side the master answers
+`ssh -O check` and the local listener is fine. `expose` is simply dead until someone
+restarts the daemon by hand.
+
+So the daemon now **requests the forward itself** — `-R <listen>:localhost:<listen>` — every
+time a master comes up and again on every reconcile tick for a public host. The request is a
+local mux round trip and is idempotent, so re-asserting costs almost nothing, and an
+already-bound port fails harmlessly.
+
+Verified by breaking it deliberately: cancelling the forward behind the daemon's back left
+the remote with 0 listeners and `expose` refused; 34 seconds later the daemon had re-bound
+it and `expose` worked again.
+
+The general lesson, which applies well beyond this line of code: **a health check that only
+looks at your own side of a tunnel is not a health check.** Everything local was green while
+the thing the feature exists for was broken.

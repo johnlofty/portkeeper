@@ -5,197 +5,408 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>local-gateway</title>
 <style>
+  /* Catppuccin Latte / Mocha — the palette this machine's terminal already runs. */
   :root {
-    --base:    #eff1f5;
-    --surface: #e6e9ef;
+    --body:    #eff1f5;
+    --panel:   #e6e9ef;
     --sunken:  #dce0e8;
-    --line:    #ccd0da;
-    --wire:    #bcc0cc;
-    --text:    #4c4f69;
-    --muted:   #6c6f85;
+    --rail:    #bcc0cc;
+    --edge:    #ccd0da;
+    --ink:     #4c4f69;
+    --dim:     #6c6f85;
     --faint:   #8c8fa1;
-    --live:    #179299;
+    --local:   #179299;
+    --remote:  #fe640b;
     --dead:    #d20f39;
     --warn:    #df8e1d;
-    --accent:  #8839ef;
+    --label:   #8839ef;
     --focus:   #1e66f5;
-    --far:     #fe640b;
+    --shade:   rgba(76, 79, 105, .07);
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --base:    #1e1e2e;
-      --surface: #181825;
+      --body:    #1e1e2e;
+      --panel:   #181825;
       --sunken:  #11111b;
-      --line:    #313244;
-      --wire:    #45475a;
-      --text:    #cdd6f4;
-      --muted:   #a6adc8;
-      --faint:   #7f849c;
-      --live:    #94e2d5;
+      --rail:    #45475a;
+      --edge:    #313244;
+      --ink:     #cdd6f4;
+      --dim:     #a6adc8;
+      --faint:   #6c7086;
+      --local:   #94e2d5;
+      --remote:  #fab387;
       --dead:    #f38ba8;
       --warn:    #f9e2af;
-      --accent:  #cba6f7;
+      --label:   #cba6f7;
       --focus:   #89b4fa;
-      --far:     #fab387;
+      --shade:   rgba(0, 0, 0, .25);
     }
   }
 
   * { box-sizing: border-box; }
-
   html { -webkit-text-size-adjust: 100%; }
 
   body {
     margin: 0;
-    padding: 24px 20px 40px;
-    background: var(--base);
-    color: var(--text);
-    font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    padding: 28px 20px 48px;
+    background: var(--body);
+    color: var(--ink);
+    font: 12.5px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
     font-synthesis: none;
     -webkit-font-smoothing: antialiased;
   }
 
-  main { max-width: 680px; margin: 0 auto; }
+  main { max-width: 620px; margin: 0 auto; }
 
-  .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace; }
+  /* Machine truth is monospace throughout; the sans face is reserved for prose,
+     so the two voices stay legibly distinct. */
+  .m {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    font-variant-numeric: tabular-nums;
+  }
 
-  /* ---- header ------------------------------------------------------- */
+  /* ---- header -------------------------------------------------------- */
 
   header {
     display: flex;
     align-items: baseline;
     justify-content: space-between;
-    gap: 16px;
+    gap: 14px;
     flex-wrap: wrap;
-    padding-bottom: 10px;
-    border-bottom: 1px solid var(--line);
+    margin-bottom: 18px;
   }
 
   h1 {
     margin: 0;
-    font-size: 19px;
-    font-weight: 600;
-    letter-spacing: -0.015em;
-    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    font: 600 17px/1.2 ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    letter-spacing: -0.02em;
   }
 
+  .head-right { display: flex; align-items: center; gap: 14px; }
+
   #summary {
-    font-size: 12px;
-    color: var(--muted);
     display: flex;
     align-items: center;
     gap: 7px;
+    font-size: 11.5px;
+    color: var(--dim);
     white-space: nowrap;
   }
-
   #link-dot {
     width: 6px; height: 6px;
     border-radius: 50%;
-    background: var(--live);
+    background: var(--local);
     flex: none;
   }
+  #summary[data-link="down"] { color: var(--dead); }
   #summary[data-link="down"] #link-dot { background: var(--dead); }
-  #summary[data-link="down"]           { color: var(--dead); }
-
-  /* ---- login -------------------------------------------------------- */
-
-  .login {
-    max-width: 320px;
-    margin: 12vh auto 0;
-  }
-  .login h1 { font-size: 20px; }
-  .login-note {
-    margin: 8px 0 20px;
-    font-size: 12.5px;
-    color: var(--muted);
-  }
-  .login form { display: flex; flex-direction: column; gap: 12px; }
-  .login .f > span { font-size: 11px; }
-  .login input[type="password"] {
-    width: 100%;
-    padding: 7px 9px;
-    border: 1px solid var(--line);
-    border-radius: 4px;
-    background: var(--base);
-    color: var(--text);
-    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-    font-size: 13px;
-    letter-spacing: 0.08em;
-  }
-  .login input[type="password"]:focus-visible {
-    outline: 2px solid var(--focus);
-    outline-offset: -1px;
-    border-color: var(--focus);
-  }
-  .login button.primary { align-self: flex-start; padding: 6px 16px; }
-  .login .err { margin-top: 0; }
-
-  .head-right { display: flex; align-items: center; gap: 12px; }
 
   .linkbtn {
-    padding: 2px 6px;
+    padding: 3px 7px;
     border: 1px solid transparent;
-    border-radius: 3px;
+    border-radius: 4px;
     background: transparent;
     color: var(--faint);
     font: 11px/1.4 ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
     cursor: pointer;
   }
-  .linkbtn:hover { color: var(--text); border-color: var(--line); }
+  .linkbtn:hover { color: var(--ink); border-color: var(--edge); }
   .linkbtn:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 
-  /* ---- flash -------------------------------------------------------- */
+  /* ---- the bay ------------------------------------------------------- */
 
-  .flash {
-    margin: 10px 0 0;
-    padding: 7px 10px;
-    border: 1px solid var(--line);
-    border-left: 2px solid var(--live);
-    border-radius: 3px;
-    background: var(--surface);
-    font-size: 12px;
-    color: var(--muted);
+  /* A recessed equipment face. The two rails are the machines: everything that
+     happens happens between them. */
+  /* The rails sit OUTSIDE the content column, never through it: content is inset by
+     --stub, and only the cable line reaches back across that gap to meet a rail. */
+  .bay {
+    --stub: 14px;
+    position: relative;
+    padding: 0 32px;
+    background: var(--panel);
+    border: 1px solid var(--edge);
+    border-radius: 9px;
+    box-shadow: inset 0 1px 0 var(--shade);
   }
-  .flash .mono { color: var(--text); }
-  .flash[data-kind="reused"] { border-left-color: var(--warn); }
 
-  /* ---- add panel ---------------------------------------------------- */
+  .bay::before, .bay::after {
+    content: "";
+    position: absolute;
+    top: 30px; bottom: 0;
+    width: 1px;
+    background: var(--rail);
+  }
+  .bay::before { left: 18px; }
+  .bay::after  { right: 18px; }
 
-  #add { padding: 10px 0 2px; border-bottom: 1px solid var(--line); }
+  /* rail caps — which machine each rail is */
+  .caps {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 11px 0 5px;
+    font: 11px/1.4 ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    color: var(--faint);
+    letter-spacing: 0.02em;
+  }
+  .cap { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-  .toggle {
+  #list { list-style: none; margin: 0; padding: 0; }
+
+  /* ---- one cable ----------------------------------------------------- */
+
+  /* No dividers between rows: a rule spanning the bay would cut both rails, and
+     the rails are the structure here. Spacing separates the cables instead. */
+  .cable { position: relative; padding: 15px 0 16px; }
+
+  .cable[data-dir="local-forward"]  { --sig: var(--local); }
+  .cable[data-dir="remote-forward"] { --sig: var(--remote); }
+  .cable[data-state="dead"]         { --sig: var(--dead); }
+
+  /* Only the cable reaches out past the content column to touch both rails. */
+  .line {
+    position: relative;
+    display: flex;
+    align-items: center;
+    min-height: 22px;
+    margin: 0 calc(var(--stub) * -1);
+  }
+
+  /* the run itself: a slack line rail-to-rail, overprinted by the endpoints.
+     Fainter than the rails so the two machines stay the dominant structure. */
+  .line::before {
+    content: "";
+    position: absolute;
+    left: 0; right: 0; top: 50%;
+    height: 1px;
+    background: var(--edge);
+  }
+
+  /* the lit portion is the lease still remaining, anchored at the origin rail,
+     so a mapping visibly retracts toward its source as it expires */
+  .gauge {
+    position: absolute;
+    top: 50%;
+    height: 1px;
+    background: var(--sig);
+    transform-origin: left center;
+  }
+  .cable[data-dir="remote-forward"] .gauge { transform-origin: right center; }
+  .cable[data-state="dead"] .gauge { background: transparent; }
+
+  .port {
+    position: relative;
+    background: var(--panel);
+    color: var(--ink);
+    font: 500 14px/1.2 ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+    text-decoration: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+  }
+  /* margin clears the rail, padding knocks the run line out from behind the text */
+  .port.l { margin-left: var(--stub); padding-right: 9px; }
+  .port.r { margin-right: var(--stub); padding-left: 9px; }
+
+  a.port[href] { cursor: pointer; }
+  a.port[href]:hover { color: var(--sig); }
+  a.port:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
+
+  .spacer { flex: 1 1 8px; min-width: 6px; }
+
+  /* arrowhead — the only thing that says which way traffic flows */
+  .head {
+    position: relative;
+    flex: none;
+    width: 11px; height: 12px;
+    background: var(--panel);
+    color: var(--sig);
+  }
+  .head::after {
+    content: "";
+    position: absolute;
+    top: 50%; left: 50%;
+    width: 0; height: 0;
+    border: 4px solid transparent;
+    transform: translate(-50%, -50%);
+  }
+  .cable[data-dir="local-forward"]  .head::after { border-left-color: currentcolor;  margin-left: 2px; }
+  .cable[data-dir="remote-forward"] .head::after { border-right-color: currentcolor; margin-left: -2px; }
+
+  /* order puts the head against the destination endpoint */
+  .port.l  { order: 1; }
+  .cable[data-dir="local-forward"]  .spacer { order: 2; }
+  .cable[data-dir="local-forward"]  .head   { order: 3; }
+  .cable[data-dir="remote-forward"] .head   { order: 2; }
+  .cable[data-dir="remote-forward"] .spacer { order: 3; }
+  .port.r  { order: 4; }
+
+  .cable[data-state="dead"] .port {
+    color: var(--faint);
+    text-decoration: line-through;
+    text-decoration-thickness: 1px;
+  }
+
+  /* Controls live on the meta line, not the cable: a run that stops short of its
+     rail to make room for buttons stops reading as a connection. */
+  .rowbtns {
+    flex: none;
+    display: flex;
+    gap: 2px;
+    margin-left: 4px;
+  }
+
+  .rowbtn {
+    width: 21px; height: 21px;
+    /* negative block margin keeps the tap target off the meta line's rhythm */
+    margin: -3px 0;
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 4px 9px 4px 6px;
-    border: 1px solid var(--line);
-    border-radius: 5px;
-    background: var(--surface);
-    color: var(--muted);
-    font: 12px/1 -apple-system, system-ui, sans-serif;
+    justify-content: center;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--faint);
+    font: 15px/1 -apple-system, system-ui, sans-serif;
     cursor: pointer;
   }
-  .toggle:hover { color: var(--text); border-color: var(--wire); }
-  .toggle:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-  .toggle .plus {
-    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-    font-size: 14px;
-    line-height: 1;
-  }
-  .toggle[aria-expanded="true"] { background: var(--sunken); color: var(--text); }
+  .rowbtn svg { display: block; flex: none; }
+  .rowbtn:hover { background: var(--sunken); color: var(--ink); }
+  .rowbtn.pull:hover { color: var(--dead); }
+  .rowbtn:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 
-  .form { padding: 12px 0 4px; }
+  /* ---- meta ---------------------------------------------------------- */
+
+  .meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 7px;
+    font-size: 11.5px;
+    color: var(--dim);
+    min-height: 19px;
+  }
+
+  .who { display: flex; align-items: baseline; gap: 9px; min-width: 0; }
+  .tail { display: flex; align-items: center; gap: 10px; flex: none; }
+
+  .dir {
+    flex: none;
+    font: 10.5px/1.4 ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    color: var(--sig);
+    opacity: .85;
+  }
+  .cable[data-state="dead"] .dir { color: var(--dead); }
+
+  .tag {
+    color: var(--label);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .times {
+    flex: none;
+    display: flex;
+    gap: 11px;
+    font: 11px/1.4 ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+  .age    { color: var(--faint); }
+  .expiry { color: var(--dim); }
+  .expiry[data-soon="1"] { color: var(--warn); }
+  .cable[data-state="dead"] .tag,
+  .cable[data-state="dead"] .expiry { color: var(--faint); }
+
+  /* ---- motion -------------------------------------------------------- */
+
+  @keyframes patch { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+  @keyframes arrive { from { opacity: 0; } to { opacity: 1; } }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .cable.enter .gauge { animation: patch .34s cubic-bezier(.2,.7,.3,1) both; }
+    .cable.enter .port, .cable.enter .head, .cable.enter .meta {
+      animation: arrive .34s ease-out both;
+    }
+    .cable.pulling { opacity: .4; transition: opacity .18s ease-out; }
+    .cable.pulling .gauge { transform: scaleX(0); transition: transform .22s ease-in; }
+  }
+
+  /* ---- foot / patch button ------------------------------------------- */
+
+  .foot {
+    position: relative;
+    display: flex;
+    padding: 10px 0 12px;
+    border-top: 1px solid var(--edge);
+  }
+  .patch {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    margin: 0 auto;
+    padding: 5px 13px;
+    border: 1px solid var(--edge);
+    border-radius: 5px;
+    background: var(--panel);
+    color: var(--dim);
+    font: 12px/1.3 -apple-system, system-ui, sans-serif;
+    cursor: pointer;
+  }
+  .patch:hover { color: var(--ink); border-color: var(--rail); }
+  .patch:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .patch .plus {
+    font: 14px/1 ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    color: var(--faint);
+  }
+  .patch[aria-expanded="true"] { background: var(--sunken); color: var(--ink); }
+
+  /* ---- notices ------------------------------------------------------- */
+
+  .bay-note {
+    position: relative;
+    padding: 26px 4px 28px;
+    max-width: 44ch;
+  }
+  .bay-note p { margin: 0 0 6px; }
+  .bay-note p:last-child { margin-bottom: 0; color: var(--dim); }
+  .bay-note.down p:first-child { color: var(--dead); }
+
+  code {
+    font: 11.5px/1.4 ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    background: var(--sunken);
+    border: 1px solid var(--edge);
+    border-radius: 3px;
+    padding: 1px 5px;
+    color: var(--ink);
+  }
+
+  /* ---- forms --------------------------------------------------------- */
+
+  .form {
+    position: relative;
+    padding: 14px 0 15px;
+    border-top: 1px solid var(--edge);
+  }
 
   .seg {
     display: inline-flex;
-    border: 1px solid var(--line);
+    border: 1px solid var(--edge);
     border-radius: 5px;
     overflow: hidden;
-    background: var(--surface);
+    background: var(--sunken);
   }
   .seg label { position: relative; display: block; }
   .seg input {
     position: absolute;
-    top: 0; left: 0;
+    inset: 0;
     width: 100%; height: 100%;
     margin: 0;
     opacity: 0;
@@ -204,24 +415,21 @@
   .seg span {
     display: block;
     padding: 5px 11px;
-    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-    font-size: 12px;
-    color: var(--muted);
+    font: 11.5px/1.4 ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    color: var(--dim);
     cursor: pointer;
     white-space: nowrap;
   }
-  .seg input:checked + span {
-    background: var(--base);
-    color: var(--text);
-    box-shadow: inset 0 -2px 0 var(--focus);
-  }
+  .seg input:checked + span { background: var(--panel); color: var(--ink); }
+  .seg label:first-child input:checked + span { box-shadow: inset 0 -2px 0 var(--local); }
+  .seg label:last-child  input:checked + span { box-shadow: inset 0 -2px 0 var(--remote); }
   .seg input:focus-visible + span { outline: 2px solid var(--focus); outline-offset: -2px; }
 
   .hint {
-    margin: 9px 0 0;
-    max-width: 52ch;
+    margin: 10px 0 0;
+    max-width: 50ch;
     font-size: 12px;
-    color: var(--muted);
+    color: var(--dim);
   }
 
   .fields {
@@ -229,36 +437,59 @@
     flex-wrap: wrap;
     align-items: flex-end;
     gap: 9px 10px;
-    margin-top: 11px;
+    margin-top: 12px;
   }
 
   .f { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-  .f > span {
-    font-size: 11px;
-    color: var(--faint);
-    letter-spacing: 0.01em;
-  }
-  .f > span em { font-style: normal; color: var(--wire); }
+  .f > span { font-size: 10.5px; color: var(--faint); }
+  .f > span em { font-style: normal; color: var(--rail); }
 
-  input[type="text"] {
-    padding: 5px 7px;
-    border: 1px solid var(--line);
+  input[type="text"], input[type="password"] {
+    padding: 5px 8px;
+    border: 1px solid var(--edge);
     border-radius: 4px;
-    background: var(--base);
-    color: var(--text);
-    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-    font-size: 12.5px;
+    background: var(--body);
+    color: var(--ink);
+    font: 12.5px/1.4 ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    font-variant-numeric: tabular-nums;
   }
-  input[type="text"]:focus-visible { outline: 2px solid var(--focus); outline-offset: -1px; border-color: var(--focus); }
-  input[type="text"]::placeholder { color: var(--wire); }
+  input[type="text"]:focus-visible, input[type="password"]:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: -1px;
+    border-color: var(--focus);
+  }
+  input::placeholder { color: var(--rail); }
 
-  .f-host  input { width: 11ch; }
+  .f-host  select { width: auto; max-width: 16ch; }
+
+  select {
+    padding: 5px 8px;
+    border: 1px solid var(--edge);
+    border-radius: 4px;
+    background: var(--body);
+    color: var(--ink);
+    font: 12.5px/1.4 ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    cursor: pointer;
+  }
+  select:focus-visible { outline: 2px solid var(--focus); outline-offset: -1px; border-color: var(--focus); }
+
+  /* A host only the console can use is worth marking: `expose` on the remote will be
+     refused for it, and finding that out from a 403 later is a poor way to learn. */
+  .hostnote {
+    margin: 9px 0 0;
+    font-size: 11.5px;
+    color: var(--dim);
+  }
+  .hostnote b { font-weight: 500; color: var(--warn); }
+
+  .addhost { display: flex; align-items: flex-end; gap: 8px; margin-top: 11px; }
+  .addhost input { width: 14ch; }
   .f-port  input { width: 8ch; }
   .f-label input { width: 12ch; }
   .f-ttl   input { width: 8ch; }
 
-  /* Field order mirrors the row: the machine the service lives on comes first. */
-  .f-host { order: 1; }
+  /* field order mirrors the bay: the machine the service lives on comes first */
+  .f-host   { order: 1; }
   .f-remote { order: 2; }
   .f-local  { order: 3; }
   .f-label  { order: 4; }
@@ -272,231 +503,101 @@
     gap: 6px;
     margin-top: 11px;
     font-size: 12px;
-    color: var(--muted);
+    color: var(--dim);
     cursor: pointer;
   }
   .check input { margin: 0; cursor: pointer; }
-  .check.off { color: var(--wire); cursor: default; }
+  .check.off { color: var(--rail); cursor: default; }
   .check.off input { cursor: default; }
 
-  .actions { display: flex; align-items: center; gap: 8px; margin-top: 13px; }
+  .actions { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
 
   button.primary, button.ghost {
-    padding: 5px 12px;
+    padding: 5px 13px;
     border-radius: 4px;
     font: 12px/1.4 -apple-system, system-ui, sans-serif;
     cursor: pointer;
   }
   button.primary {
-    border: 1px solid var(--focus);
-    background: var(--focus);
-    color: var(--base);
+    border: 1px solid var(--local);
+    background: var(--local);
+    color: var(--panel);
+    font-weight: 500;
   }
-  button.primary:hover { filter: brightness(1.08); }
+  button.primary:hover { filter: brightness(1.06); }
   button.ghost {
-    border: 1px solid var(--line);
+    border: 1px solid var(--edge);
     background: transparent;
-    color: var(--muted);
+    color: var(--dim);
   }
-  button.ghost:hover { color: var(--text); border-color: var(--wire); }
-  button.primary:focus-visible, button.ghost:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  button.ghost:hover { color: var(--ink); border-color: var(--rail); }
+  button.primary:focus-visible, button.ghost:focus-visible {
+    outline: 2px solid var(--focus); outline-offset: 2px;
+  }
 
   .err {
-    margin: 10px 0 0;
-    padding: 6px 9px;
+    margin: 11px 0 0;
+    padding: 6px 10px;
     border-left: 2px solid var(--dead);
-    background: var(--surface);
+    background: var(--sunken);
     border-radius: 0 3px 3px 0;
     font-size: 12px;
     color: var(--dead);
-    max-width: 52ch;
+    max-width: 50ch;
   }
 
-  /* ---- entries ------------------------------------------------------ */
-
-  #list { list-style: none; margin: 0; padding: 0; }
-
-  .entry {
-    position: relative;
-    padding: 13px 0 14px;
-    border-bottom: 1px solid var(--line);
-  }
-
-  @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
-  @media (prefers-reduced-motion: no-preference) {
-    .entry.enter { animation: fade .28s ease-out; }
-  }
-
-  /* line 1 — the cable. Source endpoint left, destination right, arrow always
-     pointing right: the service lives on the left, and becomes reachable on the
-     right. That invariant is what makes direction readable at a glance. */
-  .cable {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-    font-size: 13px;
-  }
-
-  .dot {
-    width: 7px; height: 7px;
-    border-radius: 50%;
-    background: var(--live);
-    flex: none;
-  }
-  .entry[data-state="dead"] .dot {
-    background: transparent;
-    box-shadow: inset 0 0 0 1.5px var(--dead);
-  }
-
-  .ep {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    text-decoration: none;
-    color: var(--text);
-    border-bottom: 1px solid transparent;
-  }
-  /* the far end (the remote box) is tinted so the two machines stay
-     distinguishable even though their positions swap with direction */
-  .ep.far { color: var(--far); }
-  a.ep[href]:hover { color: var(--live); border-bottom-color: var(--live); }
-  a.ep:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 2px; }
-
-  /* The wire doubles as the lease gauge: the lit portion is the fraction of
-     TTL still remaining, so a tunnel visibly retracts as it expires. A forward
-     with no expiry is lit end to end. */
-  .run {
-    position: relative;
-    flex: 1 1 8px;
-    min-width: 6px;
-    height: 1px;
-    background: var(--wire);
-  }
-  .run-fill {
-    position: absolute;
-    inset: 0 auto 0 0;
-    height: 1px;
-    background: var(--live);
-  }
-  .entry[data-state="dead"] .run-fill { background: transparent; }
-
-  .arrow { flex: none; color: var(--wire); margin-left: -6px; }
-
-  .entry[data-state="dead"] .ep {
-    color: var(--faint);
-    text-decoration: line-through;
-    text-decoration-thickness: 1px;
-  }
-  .entry[data-state="dead"] a.ep[href]:hover { color: var(--dead); border-bottom-color: transparent; }
-
-  .rowbtn {
-    flex: none;
-    width: 22px; height: 22px;
-    /* negative block margins keep the 22px hit target from padding the 13px
-       line; horizontal must stay 0 or the button overflows the container */
-    margin: -4px 0 -4px 2px;
-    padding: 0;
-    border: 0;
-    border-radius: 3px;
-    background: transparent;
-    color: var(--faint);
-    font: 15px/1 -apple-system, system-ui, sans-serif;
-    cursor: pointer;
-  }
-  .rowbtn.edit { display: inline-flex; align-items: center; justify-content: center; }
-  .rowbtn.edit svg { display: block; flex: none; }
-  .rowbtn:hover { background: var(--surface); color: var(--text); }
-  .rowbtn.close:hover { color: var(--dead); }
-  .rowbtn:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-
-  /* line 2 — meta */
-  .meta {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 12px;
-    margin-top: 4px;
-    padding-left: 16px;
-    font-size: 12px;
-    color: var(--muted);
-    min-height: 18px;
-  }
-
-  .who { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
-
-  .dir {
-    flex: none;
-    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-    font-size: 10.5px;
-    color: var(--faint);
-  }
-  .entry[data-dir="remote-forward"] .dir { color: var(--far); }
-
-  .label {
-    color: var(--accent);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .requester { color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-  .times {
-    flex: none;
-    display: flex;
-    gap: 12px;
-    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-    font-variant-numeric: tabular-nums;
-    font-size: 11px;
-  }
-  .age    { color: var(--faint); }
-  .expiry { color: var(--muted); }
-  .expiry[data-soon="1"] { color: var(--warn); }
-  .entry[data-state="dead"] .label,
-  .entry[data-state="dead"] .expiry { color: var(--faint); }
-
-  /* inline edit panel. Deliberately not `.edit`: the row's edit BUTTON carries
-     that class, and a bare `.edit` rule paints this panel's border and background
-     onto the button. */
+  /* inline edit. Deliberately not `.edit`: the row button carries that class and
+     a bare rule would paint this panel's border onto the button. */
   .edit-panel {
-    margin: 10px 0 2px;
-    padding: 10px 11px;
-    background: var(--surface);
-    border: 1px solid var(--line);
-    border-radius: 5px;
+    position: relative;
+    margin: 11px 0 1px;
+    padding: 11px 12px;
+    background: var(--sunken);
+    border: 1px solid var(--edge);
+    border-radius: 6px;
   }
   .edit-panel .fields { margin-top: 0; }
-  .edit-panel .actions { margin-top: 11px; }
+  .edit-panel .actions { margin-top: 12px; }
 
-  /* ---- states ------------------------------------------------------- */
+  /* ---- flash --------------------------------------------------------- */
 
-  .notice {
-    padding: 28px 0 8px;
-    max-width: 46ch;
-  }
-  .notice p { margin: 0 0 8px; }
-  .notice p:last-child { margin-bottom: 0; color: var(--muted); }
-  .notice.down p:first-child { color: var(--dead); }
-  .notice button.ghost { margin-top: 4px; }
-
-  code {
-    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  .flash {
+    margin: 0 0 14px;
+    padding: 8px 11px;
+    border: 1px solid var(--edge);
+    border-left: 2px solid var(--local);
+    border-radius: 4px;
+    background: var(--panel);
     font-size: 12px;
-    background: var(--surface);
-    border: 1px solid var(--line);
-    border-radius: 3px;
-    padding: 1px 5px;
-    color: var(--text);
+    color: var(--dim);
   }
+  .flash .m { color: var(--ink); }
+  .flash[data-kind="reused"] { border-left-color: var(--warn); }
+  .flash[data-kind="error"]  { border-left-color: var(--dead); color: var(--dead); }
+
+  /* ---- login --------------------------------------------------------- */
+
+  .login { max-width: 330px; margin: 14vh auto 0; }
+  .login h1 { font-size: 19px; }
+  .login-note { margin: 9px 0 22px; font-size: 12.5px; color: var(--dim); }
+  .login form { display: flex; flex-direction: column; gap: 13px; }
+  .login .f > span { font-size: 10.5px; }
+  .login input[type="password"] { width: 100%; letter-spacing: 0.1em; }
+  .login button.primary { align-self: flex-start; }
+  .login .err { margin-top: 0; }
 
   .hidden { display: none; }
 
-  @media (max-width: 430px) {
-    body { padding: 20px 16px 32px; }
-    .cable { font-size: 12px; gap: 7px; }
-    .meta { padding-left: 14px; }
-    .requester { display: none; }
+  @media (max-width: 460px) {
+    body { padding: 22px 14px 32px; }
+    .bay { --stub: 10px; padding: 0 22px; }
+    .bay::before { left: 12px; }
+    .bay::after  { right: 12px; }
+    .port { font-size: 13px; }
+    .port.l { padding-right: 7px; }
+    .port.r { padding-left: 7px; }
+    .rowbtns { margin-left: 4px; }
+    .age { display: none; }
   }
 </style>
 </head>
@@ -517,87 +618,104 @@
   </section>
 
   <div id="app" class="hidden">
-  <header>
-    <h1>local-gateway</h1>
-    <div class="head-right">
-      <div id="summary" data-link="up">
-        <span id="link-dot"></span>
-        <span id="summary-text">connecting</span>
+    <header>
+      <h1>local-gateway</h1>
+      <div class="head-right">
+        <div id="summary" data-link="up">
+          <span id="link-dot"></span>
+          <span id="summary-text">connecting</span>
+        </div>
+        <button type="button" class="linkbtn" id="logout" title="End this admin session">lock</button>
       </div>
-      <button type="button" class="linkbtn" id="logout" title="End this admin session">lock</button>
+    </header>
+
+    <p id="flash" class="flash hidden" role="status" aria-live="polite"></p>
+
+    <div class="bay">
+      <div class="caps">
+        <span class="cap" id="cap-remote">remote</span>
+        <span class="cap" id="cap-local">this mac</span>
+      </div>
+
+      <ul id="list"></ul>
+
+      <div id="empty" class="bay-note hidden">
+        <p>Nothing patched.</p>
+        <p>Patch a port below, or run <code>expose 3000</code> on the remote host.</p>
+      </div>
+
+      <div id="down" class="bay-note down hidden">
+        <p>The gateway daemon isn't answering.</p>
+        <p>Start <code>gatewayd</code> — this page reconnects on its own.</p>
+      </div>
+
+      <div class="foot" id="foot">
+        <button type="button" id="add-toggle" class="patch" aria-expanded="false" aria-controls="add-form">
+          <span class="plus" aria-hidden="true">+</span><span>Patch a port</span>
+        </button>
+      </div>
+
+      <form id="add-form" class="form hidden" data-dir="local-forward">
+        <div class="seg" role="group" aria-label="Direction">
+          <label>
+            <input type="radio" name="direction" value="local-forward" checked>
+            <span>local-forward</span>
+          </label>
+          <label>
+            <input type="radio" name="direction" value="remote-forward">
+            <span>remote-forward</span>
+          </label>
+        </div>
+
+        <p class="hint" id="dir-hint"></p>
+
+        <div class="fields">
+          <label class="f f-host">
+            <span>host</span>
+            <select name="host" id="host-select"></select>
+          </label>
+          <label class="f f-port f-remote">
+            <span>remote port</span>
+            <input type="text" name="remote_port" inputmode="numeric" autocomplete="off" placeholder="8530">
+          </label>
+          <label class="f f-port f-local">
+            <span>local port</span>
+            <input type="text" name="local_port" inputmode="numeric" autocomplete="off" placeholder="same">
+          </label>
+          <label class="f f-label">
+            <span>label <em>optional</em></span>
+            <input type="text" name="label" autocomplete="off" placeholder="mkdp">
+          </label>
+          <label class="f f-ttl">
+            <span>ttl <em>secs</em></span>
+            <input type="text" name="ttl" inputmode="numeric" autocomplete="off" placeholder="8h">
+          </label>
+        </div>
+
+        <div class="addhost hidden" id="addhost">
+          <label class="f">
+            <span>new host <em>ssh alias</em></span>
+            <input type="text" id="addhost-name" autocomplete="off" spellcheck="false" placeholder="box2">
+          </label>
+          <button type="button" class="ghost" id="addhost-save">Add host</button>
+          <button type="button" class="ghost" id="addhost-cancel">Cancel</button>
+        </div>
+
+        <p class="hostnote hidden" id="hostnote"></p>
+
+        <label class="check" id="open-wrap">
+          <input type="checkbox" name="open">
+          <span>open in browser</span>
+        </label>
+
+        <div class="actions">
+          <button type="submit" class="primary">Patch it</button>
+          <button type="button" class="ghost" id="add-cancel">Cancel</button>
+        </div>
+
+        <p class="err hidden" id="add-err" role="alert"></p>
+      </form>
     </div>
-  </header>
-
-  <p id="flash" class="flash hidden" role="status" aria-live="polite"></p>
-
-  <section id="add">
-    <button type="button" id="add-toggle" class="toggle" aria-expanded="false" aria-controls="add-form">
-      <span class="plus" aria-hidden="true">+</span><span>Add mapping</span>
-    </button>
-
-    <form id="add-form" class="form hidden" data-dir="local-forward">
-      <div class="seg" role="group" aria-label="Direction">
-        <label>
-          <input type="radio" name="direction" value="local-forward" checked>
-          <span>local-forward</span>
-        </label>
-        <label>
-          <input type="radio" name="direction" value="remote-forward">
-          <span>remote-forward</span>
-        </label>
-      </div>
-
-      <p class="hint" id="dir-hint"></p>
-
-      <div class="fields">
-        <label class="f f-host">
-          <span>host</span>
-          <input type="text" name="host" value="code" autocomplete="off" spellcheck="false">
-        </label>
-        <label class="f f-port f-remote">
-          <span id="lab-remote">remote port</span>
-          <input type="text" name="remote_port" inputmode="numeric" autocomplete="off" placeholder="8530">
-        </label>
-        <label class="f f-port f-local">
-          <span id="lab-local">local port</span>
-          <input type="text" name="local_port" inputmode="numeric" autocomplete="off" placeholder="same">
-        </label>
-        <label class="f f-label">
-          <span>label <em>optional</em></span>
-          <input type="text" name="label" autocomplete="off" placeholder="mkdp">
-        </label>
-        <label class="f f-ttl">
-          <span>ttl <em>secs</em></span>
-          <input type="text" name="ttl" inputmode="numeric" autocomplete="off" placeholder="8h">
-        </label>
-      </div>
-
-      <label class="check" id="open-wrap">
-        <input type="checkbox" name="open">
-        <span id="open-text">open in browser</span>
-      </label>
-
-      <div class="actions">
-        <button type="submit" class="primary">Add mapping</button>
-        <button type="button" class="ghost" id="add-cancel">Cancel</button>
-      </div>
-
-      <p class="err hidden" id="add-err" role="alert"></p>
-    </form>
-  </section>
-
-  <ul id="list"></ul>
-
-  <div id="empty" class="notice hidden">
-    <p>No mappings yet.</p>
-    <p>Add one here, or run <code>expose 8530</code> on the remote host.</p>
-    <button type="button" class="ghost" id="empty-add">Add mapping</button>
-  </div>
-
-  <div id="down" class="notice down hidden">
-    <p>The gateway daemon isn't answering.</p>
-    <p>Start <code>gatewayd</code> — this page reconnects on its own.</p>
-  </div>
   </div>
 </main>
 
@@ -608,7 +726,6 @@
   var POLL_MS = 3000;
   var LOCAL_FWD = "local-forward";
   var REMOTE_FWD = "remote-forward";
-
   var API = "/admin";
 
   var loginEl   = document.getElementById("login");
@@ -624,22 +741,30 @@
   var summaryEl = document.getElementById("summary");
   var summaryTx = document.getElementById("summary-text");
   var flashEl   = document.getElementById("flash");
+  var capRemote = document.getElementById("cap-remote");
+  var footEl    = document.getElementById("foot");
 
   var addToggle = document.getElementById("add-toggle");
   var addForm   = document.getElementById("add-form");
   var addErr    = document.getElementById("add-err");
   var addCancel = document.getElementById("add-cancel");
-  var emptyAdd  = document.getElementById("empty-add");
   var dirHint   = document.getElementById("dir-hint");
-  var labRemote = document.getElementById("lab-remote");
-  var labLocal  = document.getElementById("lab-local");
   var openWrap  = document.getElementById("open-wrap");
   var openBox   = addForm.elements["open"];
+  var hostSel   = document.getElementById("host-select");
+  var hostNote  = document.getElementById("hostnote");
+  var addHost   = document.getElementById("addhost");
+  var addHostIn = document.getElementById("addhost-name");
+
+  var ADD_HOST = "__add_host__";
+  var hosts = [];
+  var lastHost = "";
 
   var rowsByKey = new Map();
   var timer = null, flashTimer = null;
+  var firstPaint = true;
 
-  /* ---- helpers ------------------------------------------------------ */
+  /* ---- helpers ------------------------------------------------------- */
 
   function el(tag, cls, text) {
     var n = document.createElement(tag);
@@ -652,8 +777,8 @@
     return typeof v === "number" && isFinite(v) ? v : null;
   }
 
-  // Drawn rather than typed: the pencil glyphs (U+270E, U+270F) are missing from the
-  // macOS system sans stack and render as a tofu box.
+  // Drawn rather than typed: the pencil glyphs (U+270E, U+270F) are missing from
+  // the macOS system sans stack and render as a tofu box.
   function pencil() {
     var NS = "http://www.w3.org/2000/svg";
     var svg = document.createElementNS(NS, "svg");
@@ -684,9 +809,8 @@
     return hostOf(r) + ":" + dirOf(r) + ":" + rp;
   }
 
-  // Colons are legal in a path segment, and the daemon splits the id on them.
-  // Percent-encoding them would break a handler that reads the raw path, so keep
-  // them literal while still escaping anything genuinely unsafe.
+  // Colons are legal in a path segment and the daemon splits the id on them, so
+  // keep them literal while still escaping anything genuinely unsafe.
   function idPath(id) {
     return encodeURIComponent(id).replace(/%3A/gi, ":");
   }
@@ -748,22 +872,22 @@
           throw authErr;
         }
         if (!res.ok) {
-          var msg = (data && typeof data.error === "string" && data.error)
+          throw new Error((data && typeof data.error === "string" && data.error)
             ? data.error
-            : "HTTP " + res.status;
-          throw new Error(msg);
+            : "HTTP " + res.status);
         }
         return data;
       });
     });
   }
 
-  /* ---- auth --------------------------------------------------------- */
+  /* ---- auth ---------------------------------------------------------- */
 
   function showLogin() {
     if (timer) { clearTimeout(timer); timer = null; }
     rowsByKey.forEach(function (refs) { refs.li.remove(); });
     rowsByKey.clear();
+    firstPaint = true;
     appEl.classList.add("hidden");
     loginEl.classList.remove("hidden");
     flashEl.classList.add("hidden");
@@ -780,8 +904,8 @@
     ev.preventDefault();
     clearErr(loginErr);
 
-    // Straight from the field into the request body, and cleared immediately. It is
-    // never held in a variable that outlives this call, never stored, never in a URL.
+    // Straight from the field into the request body, and cleared immediately. Never
+    // held in a variable that outlives this call, never stored, never in a URL.
     var body = JSON.stringify({ password: loginPw.value });
     loginPw.value = "";
 
@@ -837,7 +961,7 @@
     flashTimer = setTimeout(function () { flashEl.classList.add("hidden"); }, 6000);
   }
 
-  /* ---- add form ----------------------------------------------------- */
+  /* ---- add form ------------------------------------------------------ */
 
   function currentDir() {
     return addForm.elements["direction"].value === REMOTE_FWD ? REMOTE_FWD : LOCAL_FWD;
@@ -851,17 +975,12 @@
       dirHint.textContent =
         "Reach a service running on the remote host from this Mac. " +
         "Leave the local port blank to mirror the remote port when it is free.";
-      labRemote.textContent = "remote port";
-      labLocal.textContent = "local port";
       addForm.elements["local_port"].placeholder = "same";
       openWrap.classList.remove("off");
       openBox.disabled = false;
     } else {
       dirHint.textContent =
-        "Let the remote host reach a service running on this Mac. " +
-        "Both ports are required.";
-      labRemote.textContent = "remote port";
-      labLocal.textContent = "local port";
+        "Let the remote host reach a service running on this Mac. Both ports are required.";
       addForm.elements["local_port"].placeholder = "3000";
       // Nothing to open here: the listener ends up on the remote host.
       openWrap.classList.add("off");
@@ -870,11 +989,105 @@
     }
   }
 
+  /* ---- hosts -------------------------------------------------------- */
+
+  // Hosts come from three places — LG_HOSTS, ~/.ssh/config, and ones typed here — but
+  // only the first is reachable by `expose` on the remote. The picker shows all of them
+  // and says so, rather than letting that difference surface as a 403 later.
+  function paintHosts(selected) {
+    var want = selected || hostSel.value || lastHost;
+    hostSel.textContent = "";
+
+    hosts.forEach(function (h) {
+      // Alias only: an option wide enough for a hostname truncates mid-address, which
+      // is worse than not showing it. The detail goes on the note line instead.
+      var o = document.createElement("option");
+      o.value = h.alias;
+      o.textContent = h.alias;
+      if (h.hostname) o.title = h.hostname;
+      hostSel.appendChild(o);
+    });
+
+    var sep = document.createElement("option");
+    sep.value = ADD_HOST;
+    sep.textContent = hosts.length ? "add a host…" : "add the first host…";
+    hostSel.appendChild(sep);
+
+    if (want && hosts.some(function (h) { return h.alias === want; })) hostSel.value = want;
+    else if (hosts.length) hostSel.value = hosts[0].alias;
+    syncHostNote();
+  }
+
+  function syncHostNote() {
+    var alias = hostSel.value;
+    if (alias === ADD_HOST) { hostNote.classList.add("hidden"); return; }
+    lastHost = alias;
+    var h = hosts.filter(function (x) { return x.alias === alias; })[0];
+    if (!h) { hostNote.classList.add("hidden"); return; }
+
+    hostNote.textContent = "";
+    if (h.hostname) hostNote.appendChild(el("span", "m", h.hostname));
+    if (!h.public) {
+      if (h.hostname) hostNote.appendChild(document.createTextNode(". "));
+      hostNote.appendChild(document.createTextNode("Console only: "));
+      hostNote.appendChild(el("b", null, "expose"));
+      hostNote.appendChild(document.createTextNode(" on the remote cannot request this host."));
+    }
+    hostNote.classList.toggle("hidden", !hostNote.textContent);
+  }
+
+  function loadHosts(selected) {
+    return api("GET", API + "/hosts").then(function (rows) {
+      hosts = Array.isArray(rows) ? rows : [];
+      paintHosts(selected);
+    }).catch(function (err) {
+      if (err && err.auth) return;
+      hosts = [];
+      paintHosts(selected);
+    });
+  }
+
+  hostSel.addEventListener("change", function () {
+    if (hostSel.value === ADD_HOST) {
+      addHost.classList.remove("hidden");
+      // The note described the host that was selected a moment ago; leaving it up
+      // makes it read as a comment on the host being typed.
+      hostNote.classList.add("hidden");
+      addHostIn.value = "";
+      addHostIn.focus();
+    } else {
+      addHost.classList.add("hidden");
+      syncHostNote();
+    }
+  });
+
+  document.getElementById("addhost-cancel").addEventListener("click", function () {
+    addHost.classList.add("hidden");
+    paintHosts(lastHost);
+    hostSel.focus();
+  });
+
+  document.getElementById("addhost-save").addEventListener("click", function () {
+    var alias = addHostIn.value.trim();
+    if (!alias) { addHostIn.focus(); return; }
+    clearErr(addErr);
+    api("POST", API + "/hosts", { alias: alias }).then(function () {
+      addHost.classList.add("hidden");
+      return loadHosts(alias);
+    }).catch(function (err) {
+      if (err && err.auth) return;
+      showErr(addErr, err && err.message ? err.message : "That host was not accepted.");
+      addHostIn.focus();
+    });
+  });
+
   function openAdd() {
+    loadHosts();
     addForm.classList.remove("hidden");
     addToggle.setAttribute("aria-expanded", "true");
-    var first = addForm.elements["remote_port"];
-    if (currentDir() === REMOTE_FWD) first = addForm.elements["local_port"];
+    var first = currentDir() === REMOTE_FWD
+      ? addForm.elements["local_port"]
+      : addForm.elements["remote_port"];
     first.focus();
   }
 
@@ -889,7 +1102,6 @@
     else closeAdd();
   });
   addCancel.addEventListener("click", closeAdd);
-  emptyAdd.addEventListener("click", openAdd);
 
   Array.prototype.forEach.call(addForm.elements["direction"], function (radio) {
     radio.addEventListener("change", syncDir);
@@ -905,7 +1117,10 @@
     var rawLocal = addForm.elements["local_port"].value.trim();
     var rawTtl = addForm.elements["ttl"].value.trim();
 
-    if (!host) { showErr(addErr, "A host is required."); return; }
+    if (!host || host === ADD_HOST) {
+      showErr(addErr, "Pick a host, or add one first.");
+      return;
+    }
 
     var remotePort = portValue(rawRemote);
     if (remotePort == null) {
@@ -946,16 +1161,17 @@
       var rremote = num(res.remote_port);
       if (rremote == null) rremote = remotePort;
 
-      var left  = el("span", "mono", endpointText(rdir, "src", host, rremote, rlocal));
-      var right = el("span", "mono", endpointText(rdir, "dst", host, rremote, rlocal));
+      var left  = el("span", "m", endpointText(rdir, "src", host, rremote, rlocal));
+      var right = el("span", "m", endpointText(rdir, "dst", host, rremote, rlocal));
 
       flash(res.reused ? "reused" : "added",
         res.reused
-          ? ["Already mapped — reusing ", left, " → ", right, "."]
-          : ["Mapped ", left, " → ", right, "."]);
+          ? ["Already patched — reusing ", left, " to ", right, "."]
+          : ["Patched ", left, " to ", right, "."]);
 
       addForm.reset();
       syncDir();
+      paintHosts(host); // reset() drops the picker back to its first option
       closeAdd();
       schedule(true);
     }).catch(function (err) {
@@ -964,7 +1180,8 @@
     });
   });
 
-  // Which machine sits on which side, given a direction.
+  // Which machine sits on which side, given a direction. Used for flash copy,
+  // where there are no rails to carry the machine identity.
   function endpointText(dir, side, host, remotePort, localPort) {
     var remoteTx = host + ":" + (remotePort != null ? remotePort : "?");
     var localTx = "127.0.0.1:" + (localPort != null ? localPort : "?");
@@ -972,51 +1189,54 @@
     return side === "src" ? remoteTx : localTx;
   }
 
-  /* ---- rows --------------------------------------------------------- */
+  /* ---- rows ---------------------------------------------------------- */
 
   function buildRow() {
-    var li = el("li", "entry");
+    var li = el("li", "cable");
 
-    var cable = el("div", "cable");
-    var dot = el("span", "dot");
-    var src = el("span", "ep");
-    var run = el("span", "run");
-    var runFill = el("span", "run-fill");
-    run.appendChild(runFill);
-    var arrow = el("span", "arrow", "→");
-    var dst = document.createElement("a");
-    dst.className = "ep";
-    dst.target = "_blank";
-    dst.rel = "noopener noreferrer";
+    var line = el("div", "line");
+    var gauge = el("span", "gauge");
+    var portL = el("span", "port l");
+    var spacer = el("span", "spacer");
+    var head = el("span", "head");
+    head.setAttribute("aria-hidden", "true");
+    var portR = document.createElement("a");
+    portR.className = "port r";
+    portR.target = "_blank";
+    portR.rel = "noopener noreferrer";
+
+    line.append(gauge, portL, spacer, head, portR);
+
+    var btns = el("span", "rowbtns");
     var edit = el("button", "rowbtn edit");
     edit.type = "button";
     edit.appendChild(pencil());
-    var close = el("button", "rowbtn close", "×");
-    close.type = "button";
-
-    cable.append(dot, src, run, arrow, dst, edit, close);
+    var pull = el("button", "rowbtn pull", "×");
+    pull.type = "button";
+    btns.append(edit, pull);
 
     var meta = el("div", "meta");
     var who = el("div", "who");
     var dir = el("span", "dir");
-    var label = el("span", "label");
-    var requester = el("span", "requester");
-    who.append(dir, label, requester);
+    var tag = el("span", "tag");
+    who.append(dir, tag);
     var times = el("div", "times");
     var age = el("span", "age");
     var expiry = el("span", "expiry");
     times.append(age, expiry);
-    meta.append(who, times);
+    var tail = el("div", "tail");
+    tail.append(times, btns);
+    meta.append(who, tail);
 
-    li.append(cable, meta);
+    li.append(line, meta);
 
     var refs = {
-      li: li, dot: dot, src: src, dst: dst, arrow: arrow, edit: edit, close: close,
-      dir: dir, label: label, requester: requester, age: age, expiry: expiry,
-      runFill: runFill, editForm: null
+      li: li, line: line, gauge: gauge, portL: portL, portR: portR, head: head,
+      edit: edit, pull: pull, dir: dir, tag: tag, age: age, expiry: expiry,
+      editForm: null
     };
 
-    close.addEventListener("click", function () { removeForward(refs); });
+    pull.addEventListener("click", function () { removeForward(refs); });
     edit.addEventListener("click", function () {
       if (refs.editForm) closeEdit(refs);
       else openEdit(refs);
@@ -1024,7 +1244,10 @@
     return refs;
   }
 
-  function paintRow(refs, r) {
+  // The rails carry machine identity, so a port is normally just its number. When
+  // several hosts are in play the left rail can no longer stand for one machine,
+  // so the host comes back onto the row.
+  function paintRow(refs, r, showHost) {
     refs.data = r;
 
     var dead = r.state === "dead";
@@ -1036,59 +1259,76 @@
     var rport = num(r.remote_port);
     var lport = num(r.local_port);
 
-    refs.src.textContent = endpointText(dir, "src", host, rport, lport);
-    refs.dst.textContent = endpointText(dir, "dst", host, rport, lport);
+    var remoteTx = (showHost ? host + ":" : "") + (rport != null ? rport : "?");
+    var localTx = lport != null ? String(lport) : "?";
 
-    // Tint whichever side is the remote box, so the two machines stay
-    // distinguishable even though they swap position with direction.
-    refs.src.classList.toggle("far", dir === LOCAL_FWD);
-    refs.dst.classList.toggle("far", dir === REMOTE_FWD);
+    refs.portL.textContent = remoteTx;
+    refs.portR.textContent = localTx;
+    refs.portL.title = host + ":" + (rport != null ? rport : "?") +
+      (r.requester ? "  — added by " + r.requester : "");
 
     var href = safeUrl(r);
     if (href) {
-      refs.dst.href = href;
-      refs.dst.title = "Open " + href;
+      refs.portR.href = href;
+      refs.portR.title = "Open " + href;
     } else {
-      refs.dst.removeAttribute("href");
-      refs.dst.removeAttribute("title");
+      refs.portR.removeAttribute("href");
+      refs.portR.title = dir === REMOTE_FWD
+        ? "Published to " + host + " — nothing to open here"
+        : "";
     }
 
     refs.dir.textContent = dir;
     refs.edit.setAttribute("aria-label", "Edit mapping " + keyOf(r));
     refs.edit.title = "Edit this mapping";
-    refs.close.setAttribute("aria-label", "Delete mapping " + keyOf(r));
-    refs.close.title = "Delete this mapping";
+    refs.pull.setAttribute("aria-label", "Remove mapping " + keyOf(r));
+    refs.pull.title = "Remove this mapping";
 
-    refs.label.textContent = r.label ? String(r.label) : "";
-    refs.requester.textContent = r.requester ? String(r.requester) : "";
+    refs.tag.textContent = r.label ? String(r.label) : "";
 
     var age = num(r.age);
     refs.age.textContent = age != null ? duration(age) + " old" : "";
-    refs.age.title = age != null ? "Forwarded " + duration(age) + " ago" : "";
+    refs.age.title = age != null ? "Patched " + duration(age) + " ago" : "";
 
     var ttl = num(r.ttl), left = num(r.expires_in);
-    if (ttl === 0) {
+    var frac = 1;
+    if (dead) {
+      // A dead mapping has no lease left to count down; showing one contradicts
+      // the struck-through endpoints right above it.
+      refs.expiry.textContent = "";
+      refs.expiry.title = "";
+      refs.expiry.removeAttribute("data-soon");
+      frac = 0;
+    } else if (ttl === 0) {
       refs.expiry.textContent = "—";
       refs.expiry.title = "No expiry";
       refs.expiry.removeAttribute("data-soon");
-      refs.runFill.style.width = dead ? "0" : "100%";
     } else if (ttl != null && ttl > 0 && left != null) {
       refs.expiry.textContent = duration(left) + " left";
       refs.expiry.title = "Expires in " + duration(left);
-      // A dead forward is already gone; counting it down would contradict that.
+      // A dead mapping is already gone; counting it down would contradict that.
       if (left < 900 && !dead) refs.expiry.dataset.soon = "1";
       else refs.expiry.removeAttribute("data-soon");
-      var frac = Math.max(0, Math.min(1, left / ttl));
-      refs.runFill.style.width = dead ? "0" : (frac * 100).toFixed(2) + "%";
+      frac = Math.max(0, Math.min(1, left / ttl));
     } else {
       refs.expiry.textContent = "";
       refs.expiry.title = "";
       refs.expiry.removeAttribute("data-soon");
-      refs.runFill.style.width = dead ? "0" : "100%";
+    }
+
+    // The gauge is anchored at the origin rail and spans toward the destination.
+    var pct = dead ? 0 : (frac * 100).toFixed(2);
+    refs.gauge.style.width = pct + "%";
+    if (dir === REMOTE_FWD) {
+      refs.gauge.style.right = "0";
+      refs.gauge.style.left = "auto";
+    } else {
+      refs.gauge.style.left = "0";
+      refs.gauge.style.right = "auto";
     }
   }
 
-  /* ---- edit / delete ------------------------------------------------ */
+  /* ---- edit / delete ------------------------------------------------- */
 
   function field(cls, labelText, value) {
     var wrap = el("label", "f " + cls);
@@ -1116,7 +1356,7 @@
     fields.append(fLabel.wrap, fTtl.wrap, fLocal.wrap, fRemote.wrap);
 
     var actions = el("div", "actions");
-    var save = el("button", "primary", "Save");
+    var save = el("button", "primary", "Save changes");
     save.type = "submit";
     var cancel = el("button", "ghost", "Cancel");
     cancel.type = "button";
@@ -1186,23 +1426,33 @@
   function removeForward(refs) {
     var r = refs.data;
     if (!r) return;
-    refs.close.disabled = true;
+    refs.pull.disabled = true;
+    // Retract the cable straight away: the motion answers the click, and the poll
+    // that follows removes the row for real.
+    refs.li.classList.add("pulling");
     api("DELETE", API + "/forward/" + idPath(keyOf(r)))
       .catch(function (err) {
+        refs.li.classList.remove("pulling");
         if (err && err.auth) return;
-        flash("error", [err && err.message ? err.message : "Could not close that mapping."]);
+        flash("error", [err && err.message ? err.message : "Could not remove that mapping."]);
       })
       .then(function () {
-        refs.close.disabled = false;
+        refs.pull.disabled = false;
         schedule(true);
       });
   }
 
-  /* ---- render ------------------------------------------------------- */
+  /* ---- render -------------------------------------------------------- */
 
   function render(rows) {
     var seen = new Set();
     var keys = [];
+
+    // One host means the left rail can name it and the rows can drop it.
+    var hosts = new Set();
+    rows.forEach(function (r) { hosts.add(hostOf(r)); });
+    var showHost = hosts.size > 1;
+    capRemote.textContent = hosts.size === 1 ? Array.from(hosts)[0] : "remote";
 
     rows.forEach(function (r, i) {
       var k = keyOf(r);
@@ -1215,12 +1465,27 @@
         refs = buildRow();
         rowsByKey.set(k, refs);
         listEl.appendChild(refs.li);
+        // One orchestrated moment: on the first painted list the cables patch in
+        // across the bay in sequence. A row added later just draws on its own.
+        if (firstPaint) {
+          var delay = Math.min(i, 8) * 45;
+          refs.gauge.style.animationDelay = delay + "ms";
+          refs.portL.style.animationDelay = delay + "ms";
+          refs.portR.style.animationDelay = delay + "ms";
+          refs.head.style.animationDelay = delay + "ms";
+        }
         refs.li.classList.add("enter");
-        // Not animationend: under reduced motion the animation never runs and
-        // the event would never fire, leaving the class stuck on every row.
-        setTimeout(function () { refs.li.classList.remove("enter"); }, 400);
+        // Not animationend: under reduced motion the animation never runs and the
+        // event would never fire, leaving the class stuck on every row.
+        setTimeout(function () {
+          refs.li.classList.remove("enter");
+          refs.gauge.style.animationDelay = "";
+          refs.portL.style.animationDelay = "";
+          refs.portR.style.animationDelay = "";
+          refs.head.style.animationDelay = "";
+        }, 900);
       }
-      paintRow(refs, r);
+      paintRow(refs, r, showHost);
     });
 
     rowsByKey.forEach(function (refs, k) {
@@ -1236,25 +1501,32 @@
       if (refs && listEl.children[i] !== refs.li) listEl.appendChild(refs.li);
     });
 
+    firstPaint = false;
+
     var live = rows.filter(function (r) { return r.state !== "dead"; }).length;
     var dead = rows.length - live;
     summaryEl.dataset.link = "up";
     summaryTx.textContent = rows.length === 0
       ? "connected"
-      : live + (live === 1 ? " mapping" : " mappings") +
-        (dead ? ", " + dead + " dead" : "");
+      : live + " patched" + (dead ? ", " + dead + " dead" : "");
 
     emptyEl.classList.toggle("hidden", rows.length !== 0);
     downEl.classList.add("hidden");
+    footEl.classList.remove("hidden");
   }
 
   function renderDown() {
     rowsByKey.forEach(function (refs) { refs.li.remove(); });
     rowsByKey.clear();
+    firstPaint = true;
     summaryEl.dataset.link = "down";
     summaryTx.textContent = "not connected";
     emptyEl.classList.add("hidden");
     downEl.classList.remove("hidden");
+    // Patching cannot succeed while the daemon is unreachable; offering it anyway
+    // would only produce a confusing failure.
+    closeAdd();
+    footEl.classList.add("hidden");
   }
 
   function poll() {

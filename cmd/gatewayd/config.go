@@ -16,7 +16,17 @@ type Config struct {
 	// authority is decided per endpoint rather than per port.
 	Listen string
 
-	Hosts       []string
+	// PublicHosts is the narrow allowlist the unauthenticated /api may target, and the
+	// set whose masters are opened eagerly — a public host is one the remote reaches us
+	// through, so its RemoteForward must exist before anything out there calls in.
+	//
+	// Hosts discovered from ssh_config are NOT added here. Discovery decides what the
+	// console offers; it must not decide what a process on a remote VM may ask for.
+	PublicHosts []string
+
+	SSHConfigPath string
+	HostsFile     string
+
 	MaxForwards int
 	DefaultTTL  time.Duration
 	ControlPath string
@@ -79,8 +89,11 @@ func loadConfig() (*Config, error) {
 	}
 
 	c := &Config{
-		Listen:      env("LG_LISTEN", "127.0.0.1:9996"),
-		Hosts:       splitHosts(env("LG_HOSTS", "code")),
+		Listen:        env("LG_LISTEN", "127.0.0.1:9996"),
+		PublicHosts:   splitHosts(env("LG_HOSTS", "code")),
+		SSHConfigPath: expandHome(env("LG_SSH_CONFIG", "~/.ssh/config"), home),
+		HostsFile: expandHome(env("LG_HOSTS_FILE",
+			filepath.Join(home, ".config", "local-gateway", "hosts")), home),
 		MaxForwards: envInt("LG_MAX_FORWARDS", 20),
 		DefaultTTL:  time.Duration(envInt("LG_DEFAULT_TTL", 28800)) * time.Second,
 		ControlPath: expandHome(env("LG_CONTROL_PATH", "~/.ssh/sockets/local-gateway-%r@%h-%p"), home),
@@ -89,7 +102,7 @@ func loadConfig() (*Config, error) {
 				filepath.Join(home, ".config", "local-gateway", "admin-password")), home)),
 	}
 
-	if len(c.Hosts) == 0 {
+	if len(c.PublicHosts) == 0 {
 		return nil, fmt.Errorf("LG_HOSTS is empty: nothing to forward to")
 	}
 	if err := requireLoopback(c.Listen); err != nil {
@@ -115,8 +128,10 @@ func requireLoopback(addr string) error {
 	return nil
 }
 
+// allows reports whether the PUBLIC api may target this host. Authenticated callers go
+// through the host book instead, which is wider.
 func (c *Config) allows(host string) bool {
-	for _, h := range c.Hosts {
+	for _, h := range c.PublicHosts {
 		if h == host {
 			return true
 		}
@@ -127,8 +142,8 @@ func (c *Config) allows(host string) bool {
 // defaultHost is only meaningful when exactly one host is configured; with several,
 // a request must say which one it means.
 func (c *Config) defaultHost() string {
-	if len(c.Hosts) == 1 {
-		return c.Hosts[0]
+	if len(c.PublicHosts) == 1 {
+		return c.PublicHosts[0]
 	}
 	return ""
 }

@@ -72,3 +72,26 @@ expose --list                                # from the remote, proves the tunne
 `expose` failing with "cannot reach the local-gateway daemon" means one of two things:
 no SSH session from the Mac is currently up (the `RemoteForward` only exists while one
 is), or the daemon isn't running. It tells you which to check.
+
+## Hosts
+
+The console picks a host from a list rather than taking a typed name. It merges three
+sources: `LG_HOSTS`, the `Host` entries in `~/.ssh/config`, and hosts added in the console
+(persisted to `~/.config/local-gateway/hosts`).
+
+Discovery does not grant access. Two tiers, because `/api` has no authentication:
+
+| Caller | May forward to |
+| ------ | -------------- |
+| the console (password) | anything in the list |
+| `expose` on a remote box | `LG_HOSTS` only |
+
+That split is deliberate. Your ssh config probably names your router and a few boxes you
+would not want a compromised dependency on a dev VM to request a tunnel to. The console
+marks any host it can reach that `expose` cannot, so the difference is visible in the picker
+instead of surfacing as a 403.
+
+`expose` does not guess which host it is on: a box cannot know what this Mac's ssh config
+calls it. It sends nothing, and the daemon fills in the single public host — or says so
+plainly when there are several. `make deploy-client` writes the alias to
+`~/.config/local-gateway/host` on the remote so it is explicit once you have more than one.

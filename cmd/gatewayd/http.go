@@ -133,6 +133,9 @@ func newServer(m *manager, cfg *Config) http.Handler {
 	// Authenticated. Full authority, both directions.
 	mux.HandleFunc("POST /admin/login", s.login)
 	mux.HandleFunc("POST /admin/logout", s.logout)
+	mux.HandleFunc("GET /admin/hosts", s.requireAdmin(s.listHosts))
+	mux.HandleFunc("POST /admin/hosts", s.requireAdmin(s.addHost))
+	mux.HandleFunc("DELETE /admin/hosts/{alias}", s.requireAdmin(s.removeHost))
 	mux.HandleFunc("GET /admin/status", s.requireAdmin(s.status))
 	mux.HandleFunc("GET /admin/forwards", s.requireAdmin(s.list))
 	mux.HandleFunc("POST /admin/forward", s.requireAdmin(s.adminOpen))
@@ -237,12 +240,58 @@ func (s *server) logout(w http.ResponseWriter, r *http.Request) {
 func (s *server) status(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"listen":        s.cfg.Listen,
-		"hosts":         s.cfg.Hosts,
+		"hosts":         s.cfg.PublicHosts,
 		"max_forwards":  s.cfg.MaxForwards,
 		"default_ttl":   int(s.cfg.DefaultTTL.Seconds()),
 		"admin_enabled": true,
 		"forwards":      len(s.m.List()),
 	})
+}
+
+// listHosts is admin-only on purpose: it describes the machines this Mac can reach, which
+// is not something an anonymous caller on a remote VM has any business enumerating.
+func (s *server) listHosts(w http.ResponseWriter, r *http.Request) {
+	if s.m.book == nil {
+		writeJSON(w, http.StatusOK, []hostEntry{})
+		return
+	}
+	writeJSON(w, http.StatusOK, s.m.book.List())
+}
+
+func (s *server) addHost(w http.ResponseWriter, r *http.Request) {
+	body, err := readAndRestore(r)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "body too large")
+		return
+	}
+	var in struct {
+		Alias string `json:"alias"`
+	}
+	if err := json.Unmarshal(body, &in); err != nil {
+		writeErr(w, http.StatusBadRequest, "malformed JSON body")
+		return
+	}
+	if s.m.book == nil {
+		writeErr(w, http.StatusServiceUnavailable, "no host book")
+		return
+	}
+	if err := s.m.book.Add(strings.TrimSpace(in.Alias)); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s *server) removeHost(w http.ResponseWriter, r *http.Request) {
+	if s.m.book == nil {
+		writeErr(w, http.StatusServiceUnavailable, "no host book")
+		return
+	}
+	if err := s.m.book.Remove(r.PathValue("alias")); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (s *server) list(w http.ResponseWriter, r *http.Request) {
@@ -305,6 +354,7 @@ func (s *server) open(w http.ResponseWriter, r *http.Request, admin bool) {
 		ttl:        ttl,
 		requester:  req.Requester,
 		open:       req.Open,
+		admin:      admin,
 	})
 	switch {
 	case errors.Is(err, errPortRange), errors.Is(err, errUnknownHost),

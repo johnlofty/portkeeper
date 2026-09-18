@@ -10,7 +10,7 @@ const testCP = "/tmp/lg-sockets/local-gateway-%r@%h-%p"
 func testCfg() *Config {
 	return &Config{
 		Listen:      "127.0.0.1:9996",
-		Hosts:       []string{"code"},
+		PublicHosts: []string{"code"},
 		MaxForwards: 3,
 		ControlPath: testCP,
 	}

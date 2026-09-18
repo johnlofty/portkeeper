@@ -71,7 +71,13 @@ logs:
 deploy-client: check
 	scp $(CLIENT) $(HOST):$(CLIENT_DST)
 	ssh $(HOST) 'chmod +x $(CLIENT_DST)'
-	@echo "deployed $(CLIENT) to $(HOST):$(CLIENT_DST)"
+	@# The alias is written rather than inferred. A box cannot work out what this Mac's
+	@# ssh config calls it -- `hostname -s` on $(HOST) does not match the alias -- and
+	@# guessing it would silently forward a port on the wrong machine once there is
+	@# more than one host. Without this file the daemon still resolves the single
+	@# public host; with two, the client must be explicit.
+	@ssh $(HOST) 'umask 077 && mkdir -p ~/.config/local-gateway && printf "%s\n" "$(HOST)" > ~/.config/local-gateway/host'
+	@echo "deployed $(CLIENT) to $(HOST):$(CLIENT_DST), host alias set to $(HOST)"
 
 # Removes only the built binary: bin/ also holds the hand-written client.
 clean:

@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -63,6 +64,10 @@ func testManager(t *testing.T) (*manager, *fakeRunner) {
 	m.pick = func() (int, error) { return 40000, nil }
 	m.alive = func(int) bool { return true }
 	m.openURL = func(string) {}
+	// A book with no ssh config and no hosts file resolves to PublicHosts alone, which
+	// keeps the admin path reachable in tests without depending on the real machine.
+	dir := t.TempDir()
+	m.book = newHostBook(cfg, filepath.Join(dir, "ssh_config"), filepath.Join(dir, "hosts"))
 	m.setHealthy("code", true)
 	return m, fr
 }
