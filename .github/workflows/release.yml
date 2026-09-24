@@ -1,9 +1,25 @@
 name: release
 
+# Three ways in:
+#   - version.yml calls this after a merged PR, with the tag it picked and the merge
+#     commit. The release creates that tag.
+#   - A v* tag pushed by hand.
+#   - Run workflow, which builds and uploads the zip as an artifact but publishes nothing.
+#
+# The tag version.yml's release creates is made with GITHUB_TOKEN, which by GitHub's rule
+# starts no further workflows, so the tag trigger below does not fire a second release.
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+      sha:
+        type: string
+        required: true
 
 permissions:
   contents: write
@@ -11,8 +27,14 @@ permissions:
 jobs:
   release:
     runs-on: macos-15
+    env:
+      # Empty for Run workflow, which is what keeps it from publishing.
+      TAG: ${{ inputs.tag || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || '' }}
+      SHA: ${{ inputs.sha || github.sha }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.SHA }}
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
@@ -20,7 +42,7 @@ jobs:
           cache: false
       - name: build and zip
         # The version comes from the tag, not `git describe`: checkout is shallow and has no tags.
-        run: make dist VERSION=${{ github.ref_name }}
+        run: make dist VERSION="${TAG:-dev-${SHA::7}}"
       - name: verify the bundle
         run: |
           codesign --verify --deep --strict build/Portkeeper.app
@@ -28,16 +50,20 @@ jobs:
           plutil -lint build/Portkeeper.app/Contents/Library/LaunchAgents/*.plist
           ls -la dist
       - name: publish
-        if: startsWith(github.ref, 'refs/tags/')
+        if: env.TAG != ''
         env:
           GH_TOKEN: ${{ github.token }}
+        # --target only matters when the tag does not exist yet (a merged PR); a pushed
+        # tag already names its commit.
         run: |
-          gh release create "${{ github.ref_name }}" dist/*.zip \
-            --title "Portkeeper ${{ github.ref_name }}" \
+          gh release create "$TAG" dist/*.zip \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$SHA" \
+            --title "Portkeeper $TAG" \
             --generate-notes \
             --notes "Apple Silicon build, ad-hoc signed and not notarized. See the README for how to open a downloaded copy."
       - uses: actions/upload-artifact@v7
-        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        if: env.TAG == ''
         with:
           name: Portkeeper-macos-arm64
           path: dist/*.zip

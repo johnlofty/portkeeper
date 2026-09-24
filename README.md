@@ -324,14 +324,24 @@ Tools, prefix it with `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`
 
 CI (`.github/workflows/ci.yml`) runs on every push to `main` and every pull request, on a
 `macos-15` runner: gofmt, vet, `go test -race`, `make check`, the Swift build and tests,
-then `make dist`, uploading the zip as a workflow artifact. The release workflow
-(`.github/workflows/release.yml`) runs on every `v*` tag: it builds with
-`make dist VERSION=<tag>`, verifies the bundle's signature and plists, and publishes
-`Portkeeper-<tag>-macos-arm64.zip` to GitHub Releases. To cut a release:
+then `make dist`, uploading the zip as a workflow artifact.
 
-```sh
-git tag v0.1.0 && git push origin v0.1.0
-```
+**Every merged pull request is a release.** `.github/workflows/version.yml` runs on each
+push to `main`, finds the PR that commit merged, and bumps the latest `vX.Y.Z` tag by
+that PR's label:
+
+| PR label        | Bump                  |
+| --------------- | --------------------- |
+| `release:major` | v1.4.2 → v2.0.0       |
+| `release:minor` | v1.4.2 → v1.5.0       |
+| none            | v1.4.2 → v1.4.3       |
+| `release:skip`  | no release            |
+
+It then runs the release workflow (`.github/workflows/release.yml`), which builds with
+`make dist VERSION=<tag>`, verifies the bundle's signature and plists, creates the tag on
+the merge commit, and publishes `Portkeeper-<tag>-macos-arm64.zip` to GitHub Releases. A
+direct push to `main` releases nothing. Pushing a `v*` tag by hand still releases that
+tag, and Run workflow on the release workflow builds the zip without publishing it.
 
 ## License
 

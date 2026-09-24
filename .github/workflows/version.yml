@@ -1,0 +1,84 @@
+name: version
+
+# Every merged pull request is a release. The PR's labels pick the bump:
+#
+#   release:major   v1.4.2 -> v2.0.0
+#   release:minor   v1.4.2 -> v1.5.0
+#   (none)          v1.4.2 -> v1.4.3
+#   release:skip    no release
+#
+# A direct push to main is not a PR merge and releases nothing. A v* tag pushed by hand
+# still releases through release.yml's own tag trigger.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: read
+
+# One at a time, whole runs included, so two quick merges cannot both pick the same
+# next version: the second starts only after the first has created its tag.
+concurrency:
+  group: version
+  cancel-in-progress: false
+
+jobs:
+  next:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.next.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - id: next
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          # The PR this commit merged. Asked of the API rather than read from the event,
+          # because a push event does not carry one, and this also finds squash merges.
+          pr=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" \
+            --jq '[.[] | select(.merged_at != null and .base.ref == "main")][0] // empty')
+          if [ -z "$pr" ]; then
+            echo "$GITHUB_SHA is not a pull request merge; no release."
+            exit 0
+          fi
+          number=$(jq -r .number <<<"$pr")
+          labels=",$(jq -r '[.labels[].name] | join(",")' <<<"$pr"),"
+
+          case "$labels" in *,release:skip,*)
+            echo "PR #$number is labelled release:skip; no release."
+            exit 0;;
+          esac
+          if git tag --points-at "$GITHUB_SHA" | grep -q '^v'; then
+            echo "$GITHUB_SHA is already tagged; no release."
+            exit 0
+          fi
+
+          # Plain vX.Y.Z tags only: a v1.2.3-rc1 is not a release to count from.
+          last=$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)
+          last=${last:-v0.0.0}
+          IFS=. read -r major minor patch <<<"${last#v}"
+          case "$labels" in
+            *,release:major,*) major=$((major + 1)); minor=0; patch=0 ;;
+            *,release:minor,*) minor=$((minor + 1)); patch=0 ;;
+            *)                 patch=$((patch + 1)) ;;
+          esac
+          tag="v$major.$minor.$patch"
+
+          echo "PR #$number: $last -> $tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  release:
+    needs: next
+    if: needs.next.outputs.tag != ''
+    uses: ./.github/workflows/release.yml
+    permissions:
+      contents: write
+    with:
+      tag: ${{ needs.next.outputs.tag }}
+      sha: ${{ github.sha }}
