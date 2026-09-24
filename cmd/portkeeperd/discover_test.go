@@ -164,37 +164,28 @@ func TestParseDiscoveryIgnoresNonsense(t *testing.T) {
 
 /* ---- the endpoint ---------------------------------------------------- */
 
-func TestListenersEndpointIsAdminOnly(t *testing.T) {
-	h, _, _ := testServer(t)
-	if w := do(t, h, "GET", "/admin/hosts/code/listeners", "", nil); w.Code != 401 {
-		t.Fatalf("anonymous listener discovery: %d, want 401", w.Code)
-	}
-}
-
 func TestListenersEndpointRejectsUnknownAndUnsafeAliases(t *testing.T) {
 	h, _, _ := testServer(t)
-	c := adminCookie(t, h)
 
 	// A host that is not in the book is not ours to enumerate.
-	if w := do(t, h, "GET", "/admin/hosts/nosuchbox/listeners", "", c); w.Code != 400 {
+	if w := do(t, h, "GET", "/admin/hosts/nosuchbox/listeners", ""); w.Code != 400 {
 		t.Errorf("unknown host: %d, want 400", w.Code)
 	}
 	// And an alias that ssh would read as an option never gets that far.
-	if w := do(t, h, "GET", "/admin/hosts/-oProxyCommand=x/listeners", "", c); w.Code != 400 {
+	if w := do(t, h, "GET", "/admin/hosts/-oProxyCommand=x/listeners", ""); w.Code != 400 {
 		t.Errorf("flag-shaped alias: %d, want 400", w.Code)
 	}
 }
 
 func TestListenersEndpointMarksWhatIsAlreadyForwarded(t *testing.T) {
 	h, m, fr := testServer(t)
-	c := adminCookie(t, h)
 
-	if w := do(t, h, "POST", "/admin/forward", `{"remote_port":3030}`, c); w.Code != 200 {
+	if w := do(t, h, "POST", "/admin/forward", `{"remote_port":3030}`); w.Code != 200 {
 		t.Fatalf("setup: %d %s", w.Code, w.Body)
 	}
 	fr.out = ssOutput
 
-	w := do(t, h, "GET", "/admin/hosts/code/listeners", "", c)
+	w := do(t, h, "GET", "/admin/hosts/code/listeners", "")
 	if w.Code != 200 {
 		t.Fatalf("code %d: %s", w.Code, w.Body)
 	}

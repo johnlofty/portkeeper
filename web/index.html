@@ -444,7 +444,7 @@
   .f > span { font-size: 10.5px; color: var(--faint); }
   .f > span em { font-style: normal; color: var(--rail); }
 
-  input[type="text"], input[type="password"] {
+  input[type="text"] {
     padding: 5px 8px;
     border: 1px solid var(--edge);
     border-radius: 4px;
@@ -453,7 +453,7 @@
     font: 12.5px/1.4 ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
     font-variant-numeric: tabular-nums;
   }
-  input[type="text"]:focus-visible, input[type="password"]:focus-visible {
+  input[type="text"]:focus-visible {
     outline: 2px solid var(--focus);
     outline-offset: -1px;
     border-color: var(--focus);
@@ -577,17 +577,6 @@
   .flash[data-kind="reused"] { border-left-color: var(--warn); }
   .flash[data-kind="error"]  { border-left-color: var(--dead); color: var(--dead); }
 
-  /* ---- login --------------------------------------------------------- */
-
-  .login { max-width: 330px; margin: 14vh auto 0; }
-  .login h1 { font-size: 19px; }
-  .login-note { margin: 9px 0 22px; font-size: 12.5px; color: var(--dim); }
-  .login form { display: flex; flex-direction: column; gap: 13px; }
-  .login .f > span { font-size: 10.5px; }
-  .login input[type="password"] { width: 100%; letter-spacing: 0.1em; }
-  .login button.primary { align-self: flex-start; }
-  .login .err { margin-top: 0; }
-
   /* ---- pinned, reconnecting ------------------------------------------ */
 
   /* A pin is a property of the mapping, not of its health, so it gets its own colour
@@ -692,21 +681,7 @@
 </head>
 <body>
 <main>
-  <section id="login" class="login hidden">
-    <h1>portkeeper</h1>
-    <p class="login-note">Enter the admin password to manage port mappings.</p>
-    <form id="login-form" autocomplete="on">
-      <label class="f">
-        <span>password</span>
-        <input type="password" id="login-pw" name="password"
-               autocomplete="current-password" spellcheck="false" required>
-      </label>
-      <button type="submit" class="primary">Unlock</button>
-      <p class="err hidden" id="login-err" role="alert"></p>
-    </form>
-  </section>
-
-  <div id="app" class="hidden">
+  <div id="app">
     <header>
       <h1>portkeeper</h1>
       <div class="head-right">
@@ -714,7 +689,6 @@
           <span id="link-dot"></span>
           <span id="summary-text">connecting</span>
         </div>
-        <button type="button" class="linkbtn" id="logout" title="End this admin session">lock</button>
       </div>
     </header>
 
@@ -844,13 +818,6 @@
   var LOCAL_FWD = "local-forward";
   var REMOTE_FWD = "remote-forward";
   var API = "/admin";
-
-  var loginEl   = document.getElementById("login");
-  var loginForm = document.getElementById("login-form");
-  var loginPw   = document.getElementById("login-pw");
-  var loginErr  = document.getElementById("login-err");
-  var appEl     = document.getElementById("app");
-  var logoutBtn = document.getElementById("logout");
 
   var listEl    = document.getElementById("list");
   var emptyEl   = document.getElementById("empty");
@@ -1024,29 +991,20 @@
     return null;
   }
 
-  // The session cookie is HttpOnly, so it is never readable here; same-origin fetch
-  // attaches it on its own. A 401 is therefore the only signal that the session is
-  // gone, and it always means "show the login view", never "render an empty table".
+  // There is no login. The daemon refuses what a browser says is cross-site, and it
+  // wants every write to declare JSON: that header is what forces a preflight on a
+  // cross-origin caller, so it is sent on every mutating call, body or not.
   function api(method, path, body) {
     var opts = {
       method: method,
-      credentials: "same-origin",
       headers: { "Accept": "application/json" }
     };
-    if (body) {
-      opts.headers["Content-Type"] = "application/json";
-      opts.body = JSON.stringify(body);
-    }
+    if (method !== "GET") opts.headers["Content-Type"] = "application/json";
+    if (body) opts.body = JSON.stringify(body);
     return fetch(path, opts).then(function (res) {
       return res.text().then(function (txt) {
         var data = null;
         try { data = txt ? JSON.parse(txt) : null; } catch (e) { data = null; }
-        if (res.status === 401) {
-          showLogin();
-          var authErr = new Error("session expired");
-          authErr.auth = true;
-          throw authErr;
-        }
         if (!res.ok) {
           throw new Error((data && typeof data.error === "string" && data.error)
             ? data.error
@@ -1056,68 +1014,6 @@
       });
     });
   }
-
-  /* ---- auth ---------------------------------------------------------- */
-
-  function showLogin() {
-    if (timer) { clearTimeout(timer); timer = null; }
-    rowsByKey.forEach(function (refs) { refs.li.remove(); });
-    rowsByKey.clear();
-    firstPaint = true;
-    appEl.classList.add("hidden");
-    loginEl.classList.remove("hidden");
-    flashEl.classList.add("hidden");
-    loginPw.focus();
-  }
-
-  function showApp() {
-    loginEl.classList.add("hidden");
-    appEl.classList.remove("hidden");
-    clearErr(loginErr);
-    // The discovery picker needs the host list whether or not the add form is ever
-    // opened, so it is loaded once here rather than on first patch.
-    loadHosts();
-  }
-
-  loginForm.addEventListener("submit", function (ev) {
-    ev.preventDefault();
-    clearErr(loginErr);
-
-    // Straight from the field into the request body, and cleared immediately. Never
-    // held in a variable that outlives this call, never stored, never in a URL.
-    var body = JSON.stringify({ password: loginPw.value });
-    loginPw.value = "";
-
-    fetch(API + "/login", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json", "Accept": "application/json" },
-      body: body
-    }).then(function (res) {
-      return res.text().then(function (txt) {
-        var data = null;
-        try { data = txt ? JSON.parse(txt) : null; } catch (e) { data = null; }
-        if (!res.ok) {
-          throw new Error((data && typeof data.error === "string" && data.error)
-            ? data.error
-            : "That password was not accepted.");
-        }
-        return data;
-      });
-    }).then(function () {
-      showApp();
-      schedule(true);
-    }).catch(function (err) {
-      showErr(loginErr, err && err.message ? err.message : "Could not sign in.");
-      loginPw.focus();
-    });
-  });
-
-  logoutBtn.addEventListener("click", function () {
-    fetch(API + "/logout", { method: "POST", credentials: "same-origin" })
-      .catch(function () { /* the session is being dropped either way */ })
-      .then(function () { showLogin(); });
-  });
 
   function showErr(node, message) {
     node.textContent = message;
@@ -1247,7 +1143,6 @@
       hosts = Array.isArray(rows) ? rows : [];
       paintHosts(selected);
     }).catch(function (err) {
-      if (err && err.auth) return;
       hosts = [];
       paintHosts(selected);
     });
@@ -1281,7 +1176,6 @@
       addHost.classList.add("hidden");
       return loadHosts(alias);
     }).catch(function (err) {
-      if (err && err.auth) return;
       showErr(addErr, err && err.message ? err.message : "That host was not accepted.");
       addHostIn.focus();
     });
@@ -1406,7 +1300,6 @@
       closeAdd();
       schedule(true);
     }).catch(function (err) {
-      if (err && err.auth) return; // the login view is already up
       showErr(addErr, err && err.message ? err.message : "The daemon rejected that mapping.");
     });
   });
@@ -1710,7 +1603,6 @@
         closeEdit(refs);
         schedule(true);
       }).catch(function (e) {
-        if (e && e.auth) return;
         showErr(err, e && e.message ? e.message : "The daemon rejected that change.");
       });
     });
@@ -1733,7 +1625,6 @@
     api("DELETE", API + "/forward/" + idPath(keyOf(r)))
       .catch(function (err) {
         refs.li.classList.remove("pulling");
-        if (err && err.auth) return;
         flash("error", [err && err.message ? err.message : "Could not remove that mapping."]);
       })
       .then(function () {
@@ -1772,7 +1663,6 @@
         paintProbe(alias, (res && Array.isArray(res.listeners)) ? res.listeners : []);
       })
       .catch(function (err) {
-        if (err && err.auth) return;
         probeTable.classList.add("hidden");
         setProbeNote(err && err.message
           ? err.message
@@ -1975,17 +1865,13 @@
   function poll() {
     // Relative path on purpose: the page works whatever port the daemon binds.
     return fetch(API + "/forwards", {
-      credentials: "same-origin",
       headers: { "Accept": "application/json" }
     })
       .then(function (res) {
-        // 401 is not "the daemon is down": the daemon answered, the session did not.
-        if (res.status === 401) { showLogin(); return null; }
         if (!res.ok) throw new Error("HTTP " + res.status);
         return res.json();
       })
       .then(function (data) {
-        if (data === null) return;
         var rows = Array.isArray(data) ? data : [];
         var waiting = rows.some(function (r) { return r.state === "reconnecting"; });
         if (!waiting) {
@@ -1997,7 +1883,6 @@
         // case stays at one request per poll. The detail — which attempt, how long
         // until the next — lives on /admin/status, not on the mapping.
         return fetch(API + "/status", {
-          credentials: "same-origin",
           headers: { "Accept": "application/json" }
         })
           .then(function (res) { return res.ok ? res.json() : null; })
@@ -2021,14 +1906,10 @@
   });
 
   syncDir();
-  // Probe once to decide which view to show. poll() flips to the login view itself
-  // on 401, so a session that is already valid lands straight on the console.
-  poll().then(function () {
-    if (loginEl.classList.contains("hidden")) {
-      showApp();
-      schedule(false);
-    }
-  });
+  // The discovery picker needs the host list whether or not the add form is ever
+  // opened, so it is loaded once here rather than on first patch.
+  loadHosts();
+  schedule(true);
 })();
 </script>
 </body>

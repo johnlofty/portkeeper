@@ -33,13 +33,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("listen %s: %v (is another portkeeperd already running?)", cfg.Listen, err)
 	}
-	if !cfg.adminEnabled() {
-		log.Print("admin is DISABLED, which leaves this daemon unable to do anything: " +
-			"every route but / refuses, and / serves only the login page. There is no " +
-			"unauthenticated API any more. Either set LG_ADMIN_PASSWORD, or write the " +
-			"password to ~/.config/portkeeper/admin-password and chmod 600 it.")
-	}
-
 	run := execRunner{}
 	book := newHostBook(cfg, cfg.SSHConfigPath, cfg.HostsFile)
 
@@ -80,8 +73,7 @@ func main() {
 		srv.Shutdown(sctx)
 	}()
 
-	log.Printf("listening on %s, hosts %v (admin %s)",
-		cfg.Listen, cfg.EagerHosts, map[bool]string{true: "enabled", false: "disabled"}[cfg.adminEnabled()])
+	log.Printf("listening on %s, hosts %v", cfg.Listen, cfg.EagerHosts)
 	if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
 		log.Printf("http: %v", err)
 	}

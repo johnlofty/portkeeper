@@ -150,11 +150,10 @@ func TestRemoteHostIsCreatedThroughTheAdminRoute(t *testing.T) {
 
 func TestAdminMayEditTheRemoteHost(t *testing.T) {
 	h, m, _ := testServer(t)
-	c := adminCookie(t, h)
 	post(t, h, `{"remote_port":5432}`)
 	id := m.List()[0].ID
 
-	if w := do(t, h, "PATCH", "/admin/forward/"+id, `{"remote_host":"db"}`, c); w.Code != 200 {
+	if w := do(t, h, "PATCH", "/admin/forward/"+id, `{"remote_host":"db"}`); w.Code != 200 {
 		t.Fatalf("edit: %d %s", w.Code, w.Body)
 	}
 	if got := m.List()[0].ID; got != "code:local-forward:db:5432" {
@@ -162,7 +161,7 @@ func TestAdminMayEditTheRemoteHost(t *testing.T) {
 	}
 	// And the same validation applies on the way in.
 	if w := do(t, h, "PATCH", "/admin/forward/code:local-forward:db:5432",
-		`{"remote_host":"db:80:other"}`, c); w.Code != 400 {
+		`{"remote_host":"db:80:other"}`); w.Code != 400 {
 		t.Fatalf("injection through edit: %d %s", w.Code, w.Body)
 	}
 }

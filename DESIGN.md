@@ -460,6 +460,9 @@ often than the local ones and never holds a lock across it.
 > **Superseded 2026-09-24.** There is one authority level now: every route except `GET /`, login and logout
 > requires the admin session, and nothing on the remote can reach the daemon at all.
 > The invariants below still hold; the public tier they were shaped around is gone.
+>
+> **Superseded 2026-09-24, again.** The admin session went too; there is no password and no
+> login. See "Dropping the login".
 
 
 Revised 2026-09-16, replacing an earlier two-port design.
@@ -497,6 +500,13 @@ works. macOS Keychain would be a better long-term store than an environment vari
 env is reasonable for a localhost developer daemon.
 
 ### Invariants
+
+> **Superseded 2026-09-24.** Invariants 1 and 2 have nothing left to protect: there is no admin
+> secret and no session. Invariant 3's first sentence stands with its object changed — source
+> address is still not evidence of anything — but "an unauthenticated request is public" no
+> longer describes the model, because there is no authentication to lack. What the daemon
+> now checks is whether a request came from a page it served, or from no browser at all. See
+> "Dropping the login".
 
 These are the point of the design, not incidental hardening:
 
@@ -889,6 +899,11 @@ What the channel cost, in hindsight, is the more persuasive half of the argument
 
 ### What the daemon is now
 
+> **Superseded 2026-09-24.** Not the login, the logout or the 401s: those went the same day. The
+> route table is now proved against the origin guard instead of the session cookie, and
+> reaching the host list no longer requires a login. See "Dropping the login". The
+> remote-cannot-reach-it half stands, and is what made dropping the login possible.
+
 One authority level. `GET /` serves the console shell, which carries no data. `POST
 /admin/login` starts a session, `POST /admin/logout` ends the one it is handed. Every other
 route returns 401 without the session cookie, and there is a test that walks the whole
@@ -931,3 +946,94 @@ The project is now called portkeeper, and everything that carried the old name f
 
 The `LG_` environment prefix is unchanged. Everything above this section uses the old
 names; it is a log, not a manual, and the names it records were the names at the time.
+
+## Dropping the login (2026-09-24)
+
+The password, the sessions, `POST /admin/login`, `POST /admin/logout` and the console's
+login view are gone. They are replaced by a guard on every route that refuses what a
+browser says is cross-site, and that the owner never sees.
+
+### Why the password had nothing left to do
+
+Every earlier section of this document names the remote as the threat, because it was:
+the control channel put a port on `code`'s loopback that anything there could POST to.
+With the channel retired there is no `RemoteForward` to the daemon, so nothing on the
+remote can reach it. That leaves two callers on the Mac.
+
+- **A process running as the owner.** Never defended against. The password file was mode
+  0600, which is readable by exactly that process, and the same process can read the ssh
+  keys the daemon's masters use; a password it can read is not a boundary against it.
+  This is still not defended, and saying so is the point of this bullet.
+- **A web page in the owner's browser.** This is the caller the password was quietly
+  standing in for. A page on any site can make the browser send requests to
+  `127.0.0.1:9996`. Until today what turned those into 401s was that the session cookie
+  was `SameSite=Strict`, not that anyone knew the password. That threat was never named
+  above, because the remote was the threat then.
+
+So the question the daemon has to answer changes. It is **still not** "did this come from
+loopback": source address remains no evidence of anything, as invariant 3 said. It is
+now **"did this come from a page this daemon served, or from no browser at all"**. A
+browser answers that honestly in its own headers, and a caller with no browser is the
+owner at a terminal, who was never being defended against.
+
+### The three checks
+
+`originGuard` wraps the whole mux, in this order:
+
+1. **Host.** `r.Host` must be `cfg.Listen` exactly, `localhost:<port>` or `[::1]:<port>`.
+   Anything else is a 400, and the value is logged once per distinct name (capped, so a
+   page minting names cannot grow the log). A hit is either misconfiguration or DNS
+   rebinding: a hostile name re-pointed at 127.0.0.1, which the browser then treats as
+   same-origin with the hostile page, so no other check here would catch it.
+2. **Fetch Metadata and Origin.** If `Sec-Fetch-Site` is present it must be `same-origin`
+   or `none`, else 403. If `Origin` is present it must equal `http://` + the Host that
+   arrived, else 403; `Origin: null` is refused by the same comparison. `same-site` is
+   refused deliberately, and it is the case that matters most here: sites ignore ports, so
+   a dev server on `localhost:3000`, or any page this daemon has local-forwarded onto
+   `127.0.0.1:<port>`, is same-site with the console. Those are pages from the remote,
+   rendered in the owner's browser, and they are exactly who this guard is for. **Absence
+   of both headers is allowed**: the rule is "reject when a browser says it is
+   cross-site", not "require a browser", so curl keeps working.
+3. **Content-Type.** A POST, PATCH or DELETE with a body must be `application/json`,
+   optionally with a charset and nothing else, or it is a 415. That type is not
+   CORS-safelisted, so a cross-origin page cannot send it without a preflight, and the
+   daemon sends no CORS headers, so the preflight fails. This is the backstop for a
+   browser too old to send Fetch Metadata on a plain form POST.
+
+Cross-site GETs are refused too, not only writes. The responses are unreadable
+cross-origin anyway, but `GET /admin/hosts/{alias}/listeners` dials a host and runs
+programs on it, and "GET is harmless" is not a property this API has.
+
+### `GET /` gets the Host check only
+
+Clicking a link to the console from another site is a top-level navigation with
+`Sec-Fetch-Site: cross-site`. The shell carries no data (every fetch it then makes is
+same-origin and goes through the full guard), and refusing it would only make the console
+look broken. It still gets the Host check, because a rebound name serving the shell is the
+first step of a rebinding attack.
+
+### The self-forward guard
+
+A remote-forward whose local port is the daemon's own listen port would publish the
+console on the remote, where nothing gates it any more — the one thing retiring the
+control channel was meant to make impossible, reintroduced through the front door. It is
+refused in `validate()` (so on create, on every member of a range, and on a pin loaded from
+disk) and in `Edit()` when a local port is changed to it. A local-forward asking for that
+port by name is refused as well: the daemon already holds it, and the mirror-then-fallback
+allocator would otherwise quietly hand out some other port instead of saying so. A
+local-forward that merely mirrors a remote 9996, with no local port asked for, takes the
+ordinary fallback. The port is parsed from `cfg.Listen` once, in `newManager`, and the
+refusal is `errSelfForward`, a 400.
+
+### What is kept, and what is left
+
+- **The `/admin` prefix stays.** It no longer means "requires the admin session"; it is
+  just where the API lives. Renaming it means the console JS and every test for no change
+  in behavior, so it is a follow-up rather than part of this.
+- **The listener is still loopback-only**, and `requireLoopback` still refuses anything
+  else at startup. The guard defends against browsers; it would defend against nothing if
+  the socket were on a LAN.
+- **`~/.config/portkeeper/admin-password`** (and `~/.config/local-gateway/admin-password`
+  from before the rename, if it survived) is now unread. It was left in place; the owner
+  may delete it. `LG_ADMIN_PASSWORD` and `LG_ADMIN_PASSWORD_FILE` are ignored.
+- `/admin/status` no longer carries `admin_enabled`.

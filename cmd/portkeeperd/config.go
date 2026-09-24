@@ -12,12 +12,13 @@ import (
 
 type Config struct {
 	// Listen carries the console and the /admin routes behind it. It is loopback-only
-	// and nothing off this Mac can reach it; requireLoopback enforces that.
+	// and nothing off this Mac can reach it; requireLoopback enforces that. Its port is
+	// also one no forward may use locally; see errSelfForward.
 	Listen string
 
 	// EagerHosts (LG_HOSTS) is the set whose masters are opened at startup rather than
 	// on first use. It says nothing about authority — every host the book knows is
-	// equally reachable to an authenticated caller — only about when the connection is
+	// equally reachable from the console — only about when the connection is
 	// made. These are the boxes in daily use, so paying for the connection up front
 	// means the first forward of the day does not wait for one.
 	//
@@ -35,56 +36,6 @@ type Config struct {
 	MaxForwards int
 	DefaultTTL  time.Duration
 	ControlPath string
-
-	// AdminPassword guards everything. Empty means admin is disabled, every route but
-	// `GET /` fails closed, and the daemon can do nothing at all until one is set.
-	//
-	// Neither source here is the right long-term home: an environment variable is
-	// visible to anything that can read the process environment, and a file is only as
-	// good as its mode. The macOS Keychain is where this belongs once the shape settles.
-	AdminPassword string
-}
-
-func (c *Config) adminEnabled() bool { return c.AdminPassword != "" }
-
-// loadAdminPassword takes the secret from the environment, or failing that from a file.
-//
-// The file exists because the launchd plist is tracked in git: putting the password in
-// the plist's EnvironmentVariables dict would leave it one `git add` away from being
-// committed. The env var still wins, for `make run` and for tests.
-//
-// Nothing here logs the password, a prefix of it, or its length.
-func loadAdminPassword(path string) string {
-	if v := os.Getenv("LG_ADMIN_PASSWORD"); v != "" {
-		return v
-	}
-
-	fi, err := os.Stat(path)
-	if err != nil {
-		return "" // absent is the normal case; adminEnabled() reports it once at startup
-	}
-	// On a machine whose threat model is "other local processes", a group- or
-	// world-readable password file is worse than no password, because it looks like
-	// protection. Refuse it loudly rather than quietly accepting it.
-	if perm := fi.Mode().Perm(); perm&0o077 != 0 {
-		logf("ignoring %s: mode %04o is readable beyond the owner; run: chmod 600 %s", path, perm, path)
-		return ""
-	}
-
-	b, err := os.ReadFile(path)
-	if err != nil {
-		logf("ignoring %s: %v", path, err)
-		return ""
-	}
-	return trimOneNewline(string(b))
-}
-
-// trimOneNewline removes exactly one trailing line ending, because these files get made
-// with `echo`. Nothing else is trimmed: leading or inner whitespace may be deliberate,
-// and silently eating it would make a correct password fail for no visible reason.
-func trimOneNewline(s string) string {
-	s = strings.TrimSuffix(s, "\n")
-	return strings.TrimSuffix(s, "\r")
 }
 
 func loadConfig() (*Config, error) {
@@ -104,9 +55,6 @@ func loadConfig() (*Config, error) {
 		MaxForwards: envInt("LG_MAX_FORWARDS", 20),
 		DefaultTTL:  time.Duration(envInt("LG_DEFAULT_TTL", 28800)) * time.Second,
 		ControlPath: expandHome(env("LG_CONTROL_PATH", "~/.ssh/sockets/portkeeper-%r@%h-%p"), home),
-		AdminPassword: loadAdminPassword(
-			expandHome(env("LG_ADMIN_PASSWORD_FILE",
-				filepath.Join(home, ".config", "portkeeper", "admin-password")), home)),
 	}
 
 	if len(c.EagerHosts) == 0 {
@@ -118,8 +66,9 @@ func loadConfig() (*Config, error) {
 	return c, nil
 }
 
-// requireLoopback refuses any non-loopback listen address. A session cookie is the only
-// thing guarding this socket, so it must never be offered anywhere but this machine.
+// requireLoopback refuses any non-loopback listen address. The origin guard refuses
+// cross-site browser requests and nothing else — there is no login — so this socket must
+// never be offered anywhere but this machine.
 func requireLoopback(addr string) error {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {

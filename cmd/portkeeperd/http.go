@@ -2,14 +2,14 @@ package main
 
 import (
 	"bytes"
-	"crypto/rand"
-	"crypto/subtle"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
+	"mime"
+	"net"
 	"net/http"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -20,17 +20,13 @@ import (
 const (
 	maxBody = 64 << 10
 
-	sessionCookie = "lg_session"
-	// Long enough to cover a working day without a re-login, short enough that a
-	// forgotten browser tab does not stay privileged indefinitely.
-	sessionTTL = 12 * time.Hour
+	// maxLoggedHosts bounds the set of refused Host values remembered for log-once. A
+	// page doing DNS rebinding can mint names as fast as it likes; the log must not grow
+	// with it.
+	maxLoggedHosts = 64
 )
 
 var (
-	errAdminDisabled = errors.New("admin is disabled: portkeeperd started with no password, " +
-		"from either LG_ADMIN_PASSWORD or ~/.config/portkeeper/admin-password")
-	errNotAdmin = errors.New("admin session required")
-
 	errOpenWithRange = errors.New("open cannot be combined with a port range: it would put one browser window on the screen per port")
 	errRangeNeedsLow = errors.New("local_port_end needs local_port: a range has to start somewhere")
 )
@@ -61,185 +57,136 @@ type editBody struct {
 	Pinned     *bool   `json:"pinned"`
 }
 
-// sessions holds the live admin logins. Ids are random and meaningless: the map is the
-// only thing that makes one valid, so a stolen cookie stops working at logout.
-type sessions struct {
-	mu sync.Mutex
-	m  map[string]time.Time
+type server struct {
+	m   *manager
+	cfg *Config
+
+	// hosts is every Host header this daemon answers to: its own listen address, and
+	// the two loopback names for the same port. Anything else is refused before routing.
+	hosts map[string]bool
+
+	logMu     sync.Mutex
+	loggedBad map[string]bool
 }
 
-func newSessions() *sessions { return &sessions{m: map[string]time.Time{}} }
-
-func (s *sessions) create(ttl time.Duration) (string, error) {
-	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
-		return "", err
+// newServer wires one listener behind one guard.
+//
+// There is no login. The daemon is driven only from the owner's own browser on this
+// Mac, nothing on the remote can reach it, and a process running as the owner was never
+// defended against. The caller left worth refusing is a web page in that browser firing
+// cross-site requests at this port, and originGuard is what refuses it; see "Dropping
+// the login" in DESIGN.md.
+//
+// There is still no address-based trust. Loopback origin is not evidence of anything,
+// so RemoteAddr is never consulted: what the guard asks is whether the request came from
+// a page this daemon served, or from no browser at all.
+//
+// The /admin prefix predates the login going and is kept only to avoid churn.
+func newServer(m *manager, cfg *Config) http.Handler {
+	s := &server{m: m, cfg: cfg, loggedBad: map[string]bool{}}
+	s.hosts = map[string]bool{cfg.Listen: true}
+	if _, port, err := net.SplitHostPort(cfg.Listen); err == nil {
+		s.hosts["localhost:"+port] = true
+		s.hosts["[::1]:"+port] = true
 	}
-	id := hex.EncodeToString(buf)
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	now := time.Now()
-	for k, exp := range s.m { // opportunistic sweep; the map never grows large
-		if now.After(exp) {
-			delete(s.m, k)
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /admin/hosts", s.listHosts)
+	mux.HandleFunc("POST /admin/hosts", s.addHost)
+	mux.HandleFunc("DELETE /admin/hosts/{alias}", s.removeHost)
+	mux.HandleFunc("GET /admin/hosts/{alias}/listeners", s.hostListeners)
+	mux.HandleFunc("GET /admin/status", s.status)
+	mux.HandleFunc("GET /admin/forwards", s.list)
+	mux.HandleFunc("POST /admin/forward", s.open)
+	mux.HandleFunc("PATCH /admin/forward/{ref}", s.edit)
+	mux.HandleFunc("DELETE /admin/forward/{ref}", s.close)
+
+	mux.HandleFunc("GET /{$}", s.root)
+	return s.originGuard(mux)
+}
+
+// originGuard refuses what a browser says is cross-site, and lets through what no
+// browser sent. Three checks, in this order:
+//
+//  1. Host must name this daemon. Anything else is misconfiguration or DNS rebinding —
+//     a hostile page whose name has been re-pointed at 127.0.0.1, which the browser
+//     then treats as same-origin with that page. 400, and the value is logged once.
+//  2. Sec-Fetch-Site, when present, must be same-origin or none, and Origin, when
+//     present, must be this daemon's own origin for the Host that arrived. same-site is
+//     refused on purpose: a dev server on localhost:3000, or one of this daemon's own
+//     local-forwards on 127.0.0.1:<port>, is same-site with the console and is exactly
+//     the page this guard exists for. Absence of both is allowed, so curl from a
+//     terminal keeps working; that caller runs as the owner and was never defended
+//     against. 403.
+//  3. A mutating request with a body must say application/json. That is not a
+//     CORS-safelisted type, so a cross-origin page cannot send it without a preflight,
+//     and this daemon answers no preflight. 415.
+//
+// GET / gets check 1 only. Following a link to the console from another site is a
+// top-level navigation with Sec-Fetch-Site: cross-site, the shell carries no data, and
+// refusing it would only make the console look broken.
+func (s *server) originGuard(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !s.hosts[r.Host] {
+			s.logBadHost(r.Host)
+			writeErr(w, http.StatusBadRequest, "unexpected Host header")
+			return
 		}
-	}
-	s.m[id] = now.Add(ttl)
-	return id, nil
+		if (r.Method == http.MethodGet || r.Method == http.MethodHead) && r.URL.Path == "/" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if site := r.Header.Get("Sec-Fetch-Site"); site != "" && site != "same-origin" && site != "none" {
+			writeErr(w, http.StatusForbidden, "cross-site request refused")
+			return
+		}
+		if origin, ok := r.Header["Origin"]; ok && (len(origin) != 1 || origin[0] != "http://"+r.Host) {
+			writeErr(w, http.StatusForbidden, "cross-origin request refused")
+			return
+		}
+		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.ContentLength != 0 && !isJSON(r.Header.Get("Content-Type")) {
+			writeErr(w, http.StatusUnsupportedMediaType, "Content-Type must be application/json")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
-func (s *sessions) valid(id string) bool {
-	if id == "" {
+// isJSON accepts application/json, optionally with a charset parameter and nothing else.
+func isJSON(ct string) bool {
+	mt, params, err := mime.ParseMediaType(ct)
+	if err != nil || mt != "application/json" {
 		return false
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	exp, ok := s.m[id]
-	if !ok {
-		return false
-	}
-	if time.Now().After(exp) {
-		delete(s.m, id)
-		return false
+	for k := range params {
+		if k != "charset" {
+			return false
+		}
 	}
 	return true
 }
 
-func (s *sessions) drop(id string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.m, id)
-}
-
-type server struct {
-	m    *manager
-	cfg  *Config
-	sess *sessions
-}
-
-// newServer wires one listener with a single level of authority.
-//
-// Everything this daemon can do is an admin capability, and the only two anonymous
-// routes are `GET /` — the console shell, which carries no data — and `POST /admin/login`,
-// which is how a caller stops being anonymous. There is no public API and nothing on the
-// remote can reach this listener at all any more; see "Retiring the control channel" in
-// DESIGN.md.
-//
-// There is deliberately no port-based or address-based trust here either. Loopback origin
-// is not evidence of anything, so RemoteAddr is never consulted for authority: a session
-// cookie is the only thing that grants any.
-func newServer(m *manager, cfg *Config) http.Handler {
-	s := &server{m: m, cfg: cfg, sess: newSessions()}
-	mux := http.NewServeMux()
-
-	mux.HandleFunc("POST /admin/login", s.login)
-	mux.HandleFunc("POST /admin/logout", s.logout)
-	mux.HandleFunc("GET /admin/hosts", s.requireAdmin(s.listHosts))
-	mux.HandleFunc("POST /admin/hosts", s.requireAdmin(s.addHost))
-	mux.HandleFunc("DELETE /admin/hosts/{alias}", s.requireAdmin(s.removeHost))
-	mux.HandleFunc("GET /admin/hosts/{alias}/listeners", s.requireAdmin(s.hostListeners))
-	mux.HandleFunc("GET /admin/status", s.requireAdmin(s.status))
-	mux.HandleFunc("GET /admin/forwards", s.requireAdmin(s.list))
-	mux.HandleFunc("POST /admin/forward", s.requireAdmin(s.open))
-	mux.HandleFunc("PATCH /admin/forward/{ref}", s.requireAdmin(s.edit))
-	mux.HandleFunc("DELETE /admin/forward/{ref}", s.requireAdmin(s.close))
-
-	mux.HandleFunc("GET /{$}", s.root)
-	return mux
-}
-
-func (s *server) isAdmin(r *http.Request) bool {
-	if !s.cfg.adminEnabled() {
-		return false
+// logBadHost records each refused Host value once. A hit means either the listen
+// address and the URL in use disagree, or something is rebinding a name to this port,
+// and either is worth one line — not one per request.
+func (s *server) logBadHost(host string) {
+	s.logMu.Lock()
+	defer s.logMu.Unlock()
+	if s.loggedBad[host] || len(s.loggedBad) >= maxLoggedHosts {
+		return
 	}
-	c, err := r.Cookie(sessionCookie)
-	if err != nil {
-		return false
-	}
-	return s.sess.valid(c.Value)
+	s.loggedBad[host] = true
+	logf("refused a request for Host %s: not this daemon's address (misconfiguration, or DNS rebinding)", strconv.Quote(host))
 }
 
-func (s *server) requireAdmin(h http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if !s.cfg.adminEnabled() {
-			writeErr(w, http.StatusServiceUnavailable, errAdminDisabled.Error())
-			return
-		}
-		if !s.isAdmin(r) {
-			writeErr(w, http.StatusUnauthorized, errNotAdmin.Error())
-			return
-		}
-		h(w, r)
-	}
-}
-
-// root always serves the console shell, which decides for itself whether to show its
-// login view or its table: every data route is 401-gated, so the shell carries no
-// mappings, no config and no password. Serving one page keeps a single login UI rather
-// than a second one inlined here that would drift from the console's own design.
+// root serves the console shell. It carries no mappings and no config; the page fetches
+// those itself, through the guarded routes.
 func (s *server) root(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write(localgateway.Console)
 }
 
-func (s *server) login(w http.ResponseWriter, r *http.Request) {
-	if !s.cfg.adminEnabled() {
-		writeErr(w, http.StatusServiceUnavailable, errAdminDisabled.Error())
-		return
-	}
-
-	body, err := readAndRestore(r)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, "body too large")
-		return
-	}
-	var in struct {
-		Password string `json:"password"`
-	}
-	if err := json.Unmarshal(body, &in); err != nil {
-		writeErr(w, http.StatusBadRequest, "malformed JSON body")
-		return
-	}
-
-	// Constant time, and the password is never logged or echoed — not here, not in the
-	// failure path, not anywhere. The server verifies it; it never hands it back out.
-	if subtle.ConstantTimeCompare([]byte(s.cfg.AdminPassword), []byte(in.Password)) != 1 {
-		logf("admin login rejected")
-		writeErr(w, http.StatusUnauthorized, "incorrect password")
-		return
-	}
-
-	id, err := s.sess.create(sessionTTL)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "could not start a session")
-		return
-	}
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookie,
-		Value:    id,
-		Path:     "/",
-		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
-		MaxAge:   int(sessionTTL / time.Second),
-	})
-	logf("admin session opened")
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-}
-
-func (s *server) logout(w http.ResponseWriter, r *http.Request) {
-	if c, err := r.Cookie(sessionCookie); err == nil {
-		s.sess.drop(c.Value)
-	}
-	http.SetCookie(w, &http.Cookie{
-		Name: sessionCookie, Value: "", Path: "/",
-		HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: -1,
-	})
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-}
-
-// status reports what the daemon is doing. It carries no secret: the password is not
-// part of the response shape at all, so it cannot leak through this route.
+// status reports what the daemon is doing.
 func (s *server) status(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"listen": s.cfg.Listen,
@@ -247,13 +194,12 @@ func (s *server) status(w http.ResponseWriter, r *http.Request) {
 		// configured names it used to be moved to `eager_hosts`. What an operator wants
 		// from this route is "is the link to that box up, and when does it try again",
 		// which a list of names cannot answer.
-		"hosts":         s.m.HostHealth(),
-		"eager_hosts":   s.cfg.EagerHosts,
-		"max_forwards":  s.cfg.MaxForwards,
-		"default_ttl":   int(s.cfg.DefaultTTL.Seconds()),
-		"admin_enabled": true,
-		"forwards":      len(s.m.List()),
-		"pinned":        s.pinCount(),
+		"hosts":        s.m.HostHealth(),
+		"eager_hosts":  s.cfg.EagerHosts,
+		"max_forwards": s.cfg.MaxForwards,
+		"default_ttl":  int(s.cfg.DefaultTTL.Seconds()),
+		"forwards":     len(s.m.List()),
+		"pinned":       s.pinCount(),
 	})
 }
 
@@ -264,8 +210,9 @@ func (s *server) pinCount() int {
 	return len(s.m.pins.List())
 }
 
-// hostListeners shows what a host is listening on. Like everything else here it needs a
-// session, and it is the route the console's Discover button calls.
+// hostListeners shows what a host is listening on. It is the route the console's
+// Discover button calls, and it runs real programs on the far side, which is one reason
+// the guard refuses a cross-site GET rather than only cross-site writes.
 func (s *server) hostListeners(w http.ResponseWriter, r *http.Request) {
 	alias := strings.TrimSpace(r.PathValue("alias"))
 	if !safeAlias.MatchString(alias) {
@@ -432,7 +379,7 @@ func forwardErrStatus(err error) int {
 		errors.Is(err, errOpenNotLocal), errors.Is(err, errRemoteHostNotLocal),
 		errors.Is(err, errBadRemoteHost), errors.Is(err, errRangeTooBig),
 		errors.Is(err, errRangeOrder), errors.Is(err, errRangeLength),
-		errors.As(err, &caller):
+		errors.Is(err, errSelfForward), errors.As(err, &caller):
 		return http.StatusBadRequest
 	case errors.Is(err, errAtCapacity):
 		return http.StatusTooManyRequests

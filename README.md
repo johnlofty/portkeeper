@@ -3,9 +3,8 @@
 Port mappings between your Mac and a remote dev box, without hand-rolling `ssh -L`.
 
 A daemon on the Mac owns one SSH ControlMaster per host and adds or drops forwards on it
-on demand. You drive it from a web console on the Mac, behind a password login. Nothing
-on the remote can reach the daemon: its listener is loopback-only and no port is forwarded
-to it.
+on demand. You drive it from a web console on the Mac. Nothing on the remote can reach the
+daemon: its listener is loopback-only and no port is forwarded to it.
 
 Two directions, named after the ssh flags they become:
 
@@ -22,7 +21,7 @@ Two directions, named after the ssh flags they become:
 flowchart LR
     subgraph mac["Your Mac"]
         browser["Browser"]
-        console["Console<br/>127.0.0.1:9996, behind login"]
+        console["Console<br/>127.0.0.1:9996"]
         daemon["portkeeperd<br/>launchd agent"]
         pins[("pinned mappings<br/>~/.config/portkeeper")]
         master["OpenSSH ControlMaster<br/>one per host, private ControlPath"]
@@ -59,15 +58,32 @@ whose mapping is missing.
 
 ## The console
 
-<http://127.0.0.1:9996/> on the Mac. Log in once per browser session; the cookie lasts
-twelve hours. From there: create, edit and delete mappings in either direction, pin the
-ones you want to survive a restart, see what a host is listening on and forward it in one
-click, and add hosts.
+<http://127.0.0.1:9996/> on the Mac (or `localhost:9996`). There is no login: the page
+loads straight into its table. From there: create, edit and delete mappings in either
+direction, pin the ones you want to survive a restart, see what a host is listening on and
+forward it in one click, and add hosts.
 
-Every route except the page itself, login and logout requires the session. There is no
-unauthenticated API. The password comes from `LG_ADMIN_PASSWORD`, or from
-`~/.config/portkeeper/admin-password` with mode 0600. Without one the daemon starts but
-can do nothing.
+What protects it is that the daemon refuses cross-site browser requests. A request whose
+`Host` is not the daemon's own address gets a 400, one the browser marks as coming from
+another site or origin (`Sec-Fetch-Site`, `Origin`) gets a 403, and a write whose body is
+not `application/json` gets a 415. So a web page open in your browser, including a dev
+server you have forwarded to `127.0.0.1`, cannot drive it. A request with no browser
+headers at all is served, so `curl` from a terminal works:
+
+```sh
+curl -s http://127.0.0.1:9996/admin/forwards
+curl -s -X POST -H 'Content-Type: application/json' \
+     -d '{"remote_port":8530}' http://127.0.0.1:9996/admin/forward
+```
+
+That is also the limit of it. Anything running as you on the Mac can reach the daemon, as
+it always could: a password file that process could read never stopped it. A mapping
+cannot use the daemon's own port as its local port, in either direction; a remote-forward
+of it would publish the console to the remote.
+
+If you have `~/.config/portkeeper/admin-password` from an earlier version (or
+`~/.config/local-gateway/admin-password` from before the rename), nothing reads it any
+more. Delete it when you like.
 
 ## Install
 
@@ -101,8 +117,7 @@ The console picks a host from a list rather than taking a typed name. It merges 
 sources: `LG_HOSTS`, the `Host` entries in `~/.ssh/config`, and hosts added in the console
 (persisted to `~/.config/portkeeper/hosts`).
 
-Any host in the list may be forwarded to, because reaching the list already required a
-login. `LG_HOSTS` marks the ones whose connection is opened eagerly at startup; every other
+Any host in the list may be forwarded to. `LG_HOSTS` marks the ones whose connection is opened eagerly at startup; every other
 host is dialled on first use.
 
 Aliases are validated, not escaped: an alias becomes an argv element handed to ssh, so

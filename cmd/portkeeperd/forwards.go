@@ -46,6 +46,13 @@ var (
 	errRangeTooBig = fmt.Errorf("a port range may cover at most %d ports", maxRangePorts)
 	errRangeOrder  = errors.New("the end of a port range must not be below its start")
 	errRangeLength = errors.New("the local and remote port ranges must cover the same number of ports")
+
+	// errSelfForward refuses a local port that is this daemon's own listen port. As a
+	// remote-forward it would publish the console to the remote, where nothing gates it;
+	// as a local-forward it names a port the daemon already holds, and the fallback
+	// allocator would quietly substitute another one instead of saying so.
+	errSelfForward = errors.New("local_port is portkeeper's own listen port: a remote-forward of it would publish " +
+		"this console to the remote, and a local-forward cannot bind it; choose another port")
 )
 
 // callerError marks a failure the caller can fix by asking for something different — a
@@ -329,6 +336,11 @@ type manager struct {
 	book *hostBook
 	pins *pinBook
 
+	// selfPort is the daemon's own listen port, parsed from cfg.Listen once. No forward
+	// may use it as its local port; see errSelfForward. 0 if Listen has no usable port,
+	// which never matches since every forward port is at least minPort.
+	selfPort int
+
 	// newMaster builds a master for a host not seen before. Masters for the configured
 	// hosts are opened at startup so the boxes actually in daily use are ready; a host
 	// discovered from ssh_config is dialled only when someone forwards to it, since
@@ -352,17 +364,22 @@ func newManager(cfg *Config, run runner, masters map[string]masterCtl) *manager 
 	if masters == nil {
 		masters = map[string]masterCtl{}
 	}
+	var self int
+	if _, port, err := net.SplitHostPort(cfg.Listen); err == nil {
+		self, _ = strconv.Atoi(port)
+	}
 	return &manager{
-		cfg:     cfg,
-		run:     run,
-		masters: masters,
-		alive:   dialAlive,
-		free:    probeFree,
-		pick:    ephemeralPort,
-		openURL: openBrowser,
-		now:     time.Now,
-		fwds:    map[fwdKey]*forward{},
-		hosts:   map[string]*hostState{},
+		cfg:      cfg,
+		run:      run,
+		selfPort: self,
+		masters:  masters,
+		alive:    dialAlive,
+		free:     probeFree,
+		pick:     ephemeralPort,
+		openURL:  openBrowser,
+		now:      time.Now,
+		fwds:     map[fwdKey]*forward{},
+		hosts:    map[string]*hostState{},
 	}
 }
 
@@ -572,7 +589,7 @@ func (m *manager) validate(r *openReq) error {
 	}
 	// One rule, because there is one authority level: a caller may reach anything the
 	// host book knows — named in LG_HOSTS, discovered in ssh_config, or added by hand.
-	// Getting this far already required a session.
+	// Getting this far already passed the origin guard.
 	if m.book == nil || !m.book.Known(r.host) {
 		return errUnknownHost
 	}
@@ -607,6 +624,9 @@ func (m *manager) validate(r *openReq) error {
 		if !inRange(r.localPort) {
 			return errPortRange
 		}
+		if r.localPort == m.selfPort {
+			return errSelfForward
+		}
 		if r.remotePort == 0 {
 			r.remotePort = r.localPort // mirror by default
 		}
@@ -619,6 +639,11 @@ func (m *manager) validate(r *openReq) error {
 		}
 		if r.localPort != 0 && !inRange(r.localPort) {
 			return errPortRange
+		}
+		// Only an explicit local port. A mirrored one (local_port unset, remote_port
+		// equal to ours) goes through the ordinary fallback: nobody asked for this port.
+		if r.localPort != 0 && r.localPort == m.selfPort {
+			return errSelfForward
 		}
 	}
 	return nil
@@ -820,6 +845,9 @@ func (m *manager) Edit(id string, e editReq) (forwardView, error) {
 	}
 	if !inRange(newLocal) || !inRange(newRemote) {
 		return forwardView{}, errPortRange
+	}
+	if newLocal != f.localPort && newLocal == m.selfPort {
+		return forwardView{}, errSelfForward
 	}
 	if newRemoteHost != "" {
 		if f.direction != dirLocal {
@@ -1038,6 +1066,16 @@ func (m *manager) ensurePins() {
 			requester:  "pinned",
 			pinned:     true,
 		})
+		if errors.Is(err, errSelfForward) {
+			// Retrying cannot help: the pin names the daemon's own port, so it will be
+			// refused on every tick until someone edits the file. Drop it, say so once.
+			if _, rmErr := m.pins.Remove(key); rmErr != nil {
+				logf("pinned %s: %v; could not remove the pin: %v", p.id(), err, rmErr)
+			} else {
+				logf("pinned %s: %v; pin removed", p.id(), err)
+			}
+			continue
+		}
 		if err != nil {
 			logf("pinned %s: %v (will retry)", p.id(), err)
 		}

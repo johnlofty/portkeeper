@@ -35,7 +35,7 @@ func setOf(body string, re *regexp.Regexp, split bool) map[string]bool {
 // really serves and checks that every hook the script reaches for exists.
 func TestConsoleMarkupHasEveryElementTheScriptUses(t *testing.T) {
 	h, _, _ := testServer(t)
-	body := do(t, h, "GET", "/", "", nil).Body.String()
+	body := do(t, h, "GET", "/", "").Body.String()
 	if !strings.Contains(body, "<script>") {
 		t.Fatal("the served console has no script block")
 	}
@@ -73,7 +73,7 @@ func TestConsoleMarkupHasEveryElementTheScriptUses(t *testing.T) {
 // ships, not only in the code that would build them.
 func TestConsoleCarriesTheNewControls(t *testing.T) {
 	h, _, _ := testServer(t)
-	body := do(t, h, "GET", "/", "", nil).Body.String()
+	body := do(t, h, "GET", "/", "").Body.String()
 
 	for _, want := range []string{
 		`name="pinned"`,      // keep across restarts

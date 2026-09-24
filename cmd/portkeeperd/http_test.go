@@ -9,53 +9,44 @@ import (
 	"testing"
 )
 
-const testPassword = "correct-horse-battery-staple"
-
 func testServer(t *testing.T) (http.Handler, *manager, *fakeRunner) {
 	t.Helper()
 	m, fr := testManager(t)
-	m.cfg.AdminPassword = testPassword
 	return newServer(m, m.cfg), m, fr
 }
 
-// post creates a mapping the way the console does: logged in, through /admin/forward.
-// There is no anonymous way to do it any more, so every test that opens a forward over
-// HTTP goes through here.
+// post creates a mapping the way the console does, through /admin/forward.
 func post(t *testing.T, h http.Handler, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	return do(t, h, "POST", "/admin/forward", body, adminCookie(t, h))
+	return do(t, h, "POST", "/admin/forward", body)
 }
 
-func do(t *testing.T, h http.Handler, method, path, body string, cookie *http.Cookie) *httptest.ResponseRecorder {
-	t.Helper()
+// newReq builds a request shaped like one from curl on this Mac: the daemon's own Host,
+// a JSON Content-Type when there is a body, and no browser headers at all.
+//
+// httptest.NewRequest defaults Host to example.com, which the origin guard refuses, so
+// every test that goes through the mux has to come through here.
+func newReq(method, path, body string) *http.Request {
 	var r *http.Request
 	if body == "" {
 		r = httptest.NewRequest(method, path, nil)
 	} else {
 		r = httptest.NewRequest(method, path, strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/json")
 	}
-	if cookie != nil {
-		r.AddCookie(cookie)
-	}
+	r.Host = testCfg().Listen
+	return r
+}
+
+func serve(h http.Handler, r *http.Request) *httptest.ResponseRecorder {
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
 	return w
 }
 
-// adminCookie logs in and returns the session cookie, failing the test if login breaks.
-func adminCookie(t *testing.T, h http.Handler) *http.Cookie {
+func do(t *testing.T, h http.Handler, method, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	w := do(t, h, "POST", "/admin/login", `{"password":"`+testPassword+`"}`, nil)
-	if w.Code != 200 {
-		t.Fatalf("login failed: %d %s", w.Code, w.Body)
-	}
-	for _, c := range w.Result().Cookies() {
-		if c.Name == sessionCookie {
-			return c
-		}
-	}
-	t.Fatal("login set no session cookie")
-	return nil
+	return serve(h, newReq(method, path, body))
 }
 
 func TestOpenHappyPath(t *testing.T) {
@@ -80,27 +71,26 @@ func TestOpenHappyPath(t *testing.T) {
 
 // Everything the old public tier was refused is now simply what /admin/forward does. A
 // remote-forward, a browser open, a target host on the remote and a pin all go through
-// the one authenticated route.
+// the one route.
 func TestAdminForwardCoversEveryCapability(t *testing.T) {
 	h, m, _ := testServer(t)
 	m.cfg.MaxForwards = 20
 	var opened []string
 	m.openURL = func(u string) { opened = append(opened, u) }
-	c := adminCookie(t, h)
 
-	if w := do(t, h, "POST", "/admin/forward", `{"direction":"remote-forward","local_port":3000}`, c); w.Code != 200 {
+	if w := do(t, h, "POST", "/admin/forward", `{"direction":"remote-forward","local_port":3000}`); w.Code != 200 {
 		t.Fatalf("remote-forward rejected: %d %s", w.Code, w.Body)
 	}
-	if w := do(t, h, "POST", "/admin/forward", `{"remote_port":8530,"open":true}`, c); w.Code != 200 {
+	if w := do(t, h, "POST", "/admin/forward", `{"remote_port":8530,"open":true}`); w.Code != 200 {
 		t.Fatalf("open rejected: %d %s", w.Code, w.Body)
 	}
-	if w := do(t, h, "POST", "/admin/forward", `{"remote_port":5432,"remote_host":"db","local_port":15432}`, c); w.Code != 200 {
+	if w := do(t, h, "POST", "/admin/forward", `{"remote_port":5432,"remote_host":"db","local_port":15432}`); w.Code != 200 {
 		t.Fatalf("target host on the remote rejected: %d %s", w.Code, w.Body)
 	}
-	if w := do(t, h, "POST", "/admin/forward", `{"remote_port":9100,"pinned":true}`, c); w.Code != 200 {
+	if w := do(t, h, "POST", "/admin/forward", `{"remote_port":9100,"pinned":true}`); w.Code != 200 {
 		t.Fatalf("pin rejected: %d %s", w.Code, w.Body)
 	}
-	if w := do(t, h, "POST", "/admin/forward", `{"remote_port":8000,"remote_port_end":8002}`, c); w.Code != 200 {
+	if w := do(t, h, "POST", "/admin/forward", `{"remote_port":8000,"remote_port_end":8002}`); w.Code != 200 {
 		t.Fatalf("range rejected: %d %s", w.Code, w.Body)
 	}
 
@@ -121,50 +111,109 @@ func TestAdminForwardCoversEveryCapability(t *testing.T) {
 			id = v.ID
 		}
 	}
-	if w := do(t, h, "DELETE", "/admin/forward/"+id, "", c); w.Code != 200 {
+	if w := do(t, h, "DELETE", "/admin/forward/"+id, ""); w.Code != 200 {
 		t.Fatalf("close of a remote-forward: %d %s", w.Code, w.Body)
 	}
 }
 
-// The whole authority model in one assertion: GET /, POST /admin/login and POST /admin/logout are
-// the only routes an anonymous caller gets anything but a 401 from. This is the list the retired
-// control channel used to sit outside of, so it is worth checking exhaustively rather
-// than per feature.
-func TestEveryRouteButRootAndLoginRequiresASession(t *testing.T) {
-	h, _, _ := testServer(t)
-	cases := []struct{ method, path, body string }{
-		{"GET", "/admin/hosts", ""},
-		{"POST", "/admin/hosts", `{"alias":"box2"}`},
-		{"DELETE", "/admin/hosts/box2", ""},
-		{"GET", "/admin/hosts/code/listeners", ""},
-		{"GET", "/admin/status", ""},
-		{"GET", "/admin/forwards", ""},
-		{"POST", "/admin/forward", `{"remote_port":8530}`},
-		{"PATCH", "/admin/forward/code:local-forward:8530", `{"label":"x"}`},
-		{"DELETE", "/admin/forward/code:local-forward:8530", ""},
+// The whole authority model in one assertion: every data route refuses what a browser
+// says is cross-site, refuses a Host that is not this daemon, refuses a body that is not
+// JSON, and serves the same request with none of those headers. This is the table the
+// session check used to be proved against, and it is walked exhaustively for the same
+// reason: a route added without the guard should fail here, not in production.
+func TestEveryDataRouteRefusesCrossSiteAndServesTheConsole(t *testing.T) {
+	h, m, _ := testServer(t)
+	m.cfg.MaxForwards = 20
+
+	// Order matters only where one case's success is the next one's precondition: the
+	// host has to exist before it can be removed.
+	cases := []struct {
+		method, path, body string
+		want               int
+	}{
+		{"GET", "/admin/hosts", "", 200},
+		{"POST", "/admin/hosts", `{"alias":"box2"}`, 200},
+		{"DELETE", "/admin/hosts/box2", "", 200},
+		{"GET", "/admin/hosts/code/listeners", "", 200},
+		{"GET", "/admin/status", "", 200},
+		{"GET", "/admin/forwards", "", 200},
+		{"POST", "/admin/forward", `{"remote_port":8530}`, 200},
+		{"PATCH", "/admin/forward/code:local-forward:8530", `{"label":"x"}`, 200},
+		{"DELETE", "/admin/forward/code:local-forward:8530", "", 200},
+		{"PATCH", "/admin/forward/code:local-forward:1234", `{"label":"x"}`, 404},
+		{"DELETE", "/admin/forward/code:local-forward:1234", "", 404},
 	}
+	refusals := []struct {
+		name   string
+		mutate func(*http.Request)
+		want   int
+	}{
+		{"Sec-Fetch-Site: cross-site", func(r *http.Request) { r.Header.Set("Sec-Fetch-Site", "cross-site") }, 403},
+		{"Sec-Fetch-Site: same-site", func(r *http.Request) { r.Header.Set("Sec-Fetch-Site", "same-site") }, 403},
+		{"Origin: https://evil.example", func(r *http.Request) { r.Header.Set("Origin", "https://evil.example") }, 403},
+		{"Origin: null", func(r *http.Request) { r.Header.Set("Origin", "null") }, 403},
+		// A local-forward is same-site with the console; its page must not be able to
+		// drive the daemon.
+		{"Origin: a forwarded dev server", func(r *http.Request) { r.Header.Set("Origin", "http://127.0.0.1:8530") }, 403},
+		{"Host: evil.example", func(r *http.Request) { r.Host = "evil.example" }, 400},
+		{"Host: right name, wrong port", func(r *http.Request) { r.Host = "127.0.0.1:9997" }, 400},
+	}
+
 	for _, c := range cases {
-		if w := do(t, h, c.method, c.path, c.body, nil); w.Code != 401 {
-			t.Errorf("%s %s: code %d, want 401", c.method, c.path, w.Code)
+		// Every refusal first, so nothing has mutated state before it is checked.
+		for _, rf := range refusals {
+			r := newReq(c.method, c.path, c.body)
+			rf.mutate(r)
+			if w := serve(h, r); w.Code != rf.want {
+				t.Errorf("%s %s with %s: code %d, want %d", c.method, c.path, rf.name, w.Code, rf.want)
+			}
+		}
+		if c.body != "" {
+			r := newReq(c.method, c.path, c.body)
+			r.Header.Set("Content-Type", "text/plain")
+			if w := serve(h, r); w.Code != 415 {
+				t.Errorf("%s %s with Content-Type: text/plain: code %d, want 415", c.method, c.path, w.Code)
+			}
+		}
+		if w := do(t, h, c.method, c.path, c.body); w.Code != c.want {
+			t.Errorf("%s %s with no browser headers: code %d, want %d: %s", c.method, c.path, w.Code, c.want, w.Body)
+		}
+	}
+	if n := len(m.List()); n != 0 {
+		t.Fatalf("%d mapping(s) left; a refused request got through", n)
+	}
+
+	// What the console itself sends, from either loopback name. The Origin comparison is
+	// against the Host that arrived, not against the configured listen address.
+	for _, host := range []string{"127.0.0.1:9996", "localhost:9996", "[::1]:9996"} {
+		r := newReq("POST", "/admin/forward", `{"remote_port":8531}`)
+		r.Host = host
+		r.Header.Set("Sec-Fetch-Site", "same-origin")
+		r.Header.Set("Origin", "http://"+host)
+		r.Header.Set("Content-Type", "application/json; charset=utf-8")
+		if w := serve(h, r); w.Code != 200 {
+			t.Errorf("the console's own request via %s: code %d, want 200: %s", host, w.Code, w.Body)
 		}
 	}
 
-	// The three that are deliberately open. The shell carries no data, login is how a
-	// session starts, and logout can only end the session it is handed — none of them
-	// exercises any authority.
-	if w := do(t, h, "GET", "/", "", nil); w.Code != 200 {
-		t.Errorf("GET /: code %d, want the console shell", w.Code)
+	// The shell: a link from another site is a cross-site navigation and must still
+	// land, but a foreign Host is refused here too.
+	r := newReq("GET", "/", "")
+	r.Header.Set("Sec-Fetch-Site", "cross-site")
+	if w := serve(h, r); w.Code != 200 {
+		t.Errorf("GET / with Sec-Fetch-Site: cross-site: code %d, want the console shell", w.Code)
 	}
-	if w := do(t, h, "POST", "/admin/login", `{"password":"`+testPassword+`"}`, nil); w.Code != 200 {
-		t.Errorf("POST /admin/login: code %d, want 200", w.Code)
-	}
-	if w := do(t, h, "POST", "/admin/logout", "", nil); w.Code != 200 {
-		t.Errorf("POST /admin/logout without a session: code %d, want 200 (nothing to end, nothing leaked)", w.Code)
+	r = newReq("GET", "/", "")
+	r.Host = "evil.example"
+	if w := serve(h, r); w.Code != 400 {
+		t.Errorf("GET / with Host: evil.example: code %d, want 400", w.Code)
 	}
 
-	// The routes the control channel used to answer on are gone, not merely gated: a
-	// 401 here would mean the handler was still wired up.
+	// The routes the control channel and the login used to answer on are gone, not
+	// merely gated.
 	for _, c := range []struct{ method, path, body string }{
+		{"POST", "/admin/login", `{"password":"x"}`},
+		{"POST", "/admin/logout", ""},
 		{"GET", "/api/forwards", ""},
 		{"POST", "/api/forward", `{"remote_port":8530}`},
 		{"DELETE", "/api/forward/code:local-forward:8530", ""},
@@ -172,147 +221,50 @@ func TestEveryRouteButRootAndLoginRequiresASession(t *testing.T) {
 		{"GET", "/forwards", ""},
 		{"DELETE", "/forward/8530", ""},
 	} {
-		if w := do(t, h, c.method, c.path, c.body, nil); w.Code != 404 {
+		if w := do(t, h, c.method, c.path, c.body); w.Code != 404 {
 			t.Errorf("%s %s: code %d, want 404 — the route should not exist", c.method, c.path, w.Code)
 		}
 	}
-
-	// A made-up cookie is not a session.
-	bogus := &http.Cookie{Name: sessionCookie, Value: "deadbeef"}
-	if w := do(t, h, "GET", "/admin/status", "", bogus); w.Code != 401 {
-		t.Errorf("forged cookie accepted: %d", w.Code)
-	}
 }
 
-func TestLoginRejectsWrongPasswordAndSetsNoCookie(t *testing.T) {
-	h, _, _ := testServer(t)
-	w := do(t, h, "POST", "/admin/login", `{"password":"wrong"}`, nil)
-	if w.Code != 401 {
-		t.Fatalf("code %d, want 401", w.Code)
-	}
-	for _, c := range w.Result().Cookies() {
-		if c.Name == sessionCookie && c.Value != "" {
-			t.Fatal("a failed login issued a session cookie")
-		}
-	}
-}
-
-func TestLoginCookieIsHardened(t *testing.T) {
-	h, _, _ := testServer(t)
-	c := adminCookie(t, h)
-	if !c.HttpOnly {
-		t.Error("session cookie is not HttpOnly")
-	}
-	if c.SameSite != http.SameSiteStrictMode {
-		t.Error("session cookie is not SameSite=Strict")
-	}
-	if len(c.Value) < 32 {
-		t.Errorf("session id looks too short to be random: %q", c.Value)
-	}
-}
-
-func TestLogoutInvalidatesSession(t *testing.T) {
-	h, _, _ := testServer(t)
-	c := adminCookie(t, h)
-	if w := do(t, h, "GET", "/admin/status", "", c); w.Code != 200 {
-		t.Fatalf("session not usable before logout: %d", w.Code)
-	}
-	if w := do(t, h, "POST", "/admin/logout", "", c); w.Code != 200 {
-		t.Fatalf("logout: %d", w.Code)
-	}
-	if w := do(t, h, "GET", "/admin/status", "", c); w.Code != 401 {
-		t.Fatalf("session still valid after logout: %d", w.Code)
-	}
-}
-
-// The server verifies the password; it must never hand it back out. This walks every
-// route that could plausibly carry it.
-func TestPasswordNeverAppearsInAnyResponse(t *testing.T) {
-	h, _, _ := testServer(t)
-	c := adminCookie(t, h)
-	post(t, h, `{"remote_port":8530}`)
-
-	probes := []*httptest.ResponseRecorder{
-		do(t, h, "GET", "/", "", nil), // login page
-		do(t, h, "GET", "/", "", c),   // console
-		do(t, h, "GET", "/admin/status", "", c),
-		do(t, h, "GET", "/admin/forwards", "", c),
-		do(t, h, "GET", "/admin/forwards", "", nil), // unauthorized error path
-		do(t, h, "POST", "/admin/login", `{"password":"wrong"}`, nil),
-		do(t, h, "POST", "/admin/login", `{"password":"`+testPassword+`"}`, nil),
-		do(t, h, "GET", "/admin/status", "", nil), // unauthorized error path
-	}
-	for i, w := range probes {
-		if strings.Contains(w.Body.String(), testPassword) {
-			t.Fatalf("probe %d leaked the password: %s", i, w.Body)
-		}
-		for _, v := range w.Header() {
-			if strings.Contains(strings.Join(v, " "), testPassword) {
-				t.Fatalf("probe %d leaked the password in a header", i)
-			}
-		}
-	}
-}
-
-// Without a password the daemon must fail closed rather than open. With no public API
-// left, that means it can do nothing at all except serve the login page — which is what
-// the startup log now says in as many words.
-func TestAdminDisabledFailsClosed(t *testing.T) {
-	m, _ := testManager(t)
-	m.cfg.AdminPassword = ""
-	h := newServer(m, m.cfg)
-
-	if w := do(t, h, "POST", "/admin/login", `{"password":""}`, nil); w.Code != 503 {
-		t.Errorf("login with admin disabled: code %d, want 503", w.Code)
-	}
-	for _, c := range []struct{ method, path, body string }{
-		{"GET", "/admin/status", ""},
-		{"GET", "/admin/forwards", ""},
-		{"POST", "/admin/forward", `{"remote_port":8530}`},
-		{"DELETE", "/admin/forward/code:local-forward:8530", ""},
+// The guard's Content-Type rule is narrow on both sides: a charset is fine, anything
+// else riding along with application/json is not, and a bodiless DELETE needs none.
+func TestContentTypeRule(t *testing.T) {
+	for ct, want := range map[string]bool{
+		"application/json":                  true,
+		"application/json; charset=utf-8":   true,
+		"Application/JSON":                  true,
+		"application/json; boundary=x":      false,
+		"text/plain":                        false,
+		"application/x-www-form-urlencoded": false,
+		"multipart/form-data; boundary=x":   false,
+		"":                                  false,
 	} {
-		if w := do(t, h, c.method, c.path, c.body, nil); w.Code != 503 {
-			t.Errorf("%s %s with admin disabled: code %d, want 503", c.method, c.path, w.Code)
+		if got := isJSON(ct); got != want {
+			t.Errorf("isJSON(%q) = %v, want %v", ct, got, want)
 		}
+	}
+
+	h, m, _ := testServer(t)
+	post(t, h, `{"remote_port":8530}`)
+	r := newReq("DELETE", "/admin/forward/"+m.List()[0].ID, "")
+	r.Header.Del("Content-Type")
+	if w := serve(h, r); w.Code != 200 {
+		t.Fatalf("bodiless DELETE with no Content-Type: code %d, want 200: %s", w.Code, w.Body)
+	}
+}
+
+// The self-forward refusal is a caller mistake, so it reads as one over HTTP.
+func TestSelfForwardIs400OverHTTP(t *testing.T) {
+	h, m, _ := testServer(t)
+	if w := post(t, h, `{"direction":"remote-forward","local_port":9996}`); w.Code != 400 {
+		t.Fatalf("remote-forward of the listen port: code %d, want 400: %s", w.Code, w.Body)
+	}
+	if w := post(t, h, `{"remote_port":8530,"local_port":9996}`); w.Code != 400 {
+		t.Fatalf("local-forward onto the listen port: code %d, want 400: %s", w.Code, w.Body)
 	}
 	if n := len(m.List()); n != 0 {
-		t.Fatalf("something got through with admin disabled: %d mapping(s)", n)
-	}
-	// The shell still serves, so the page can say why nothing works.
-	if w := do(t, h, "GET", "/", "", nil); w.Code != 200 {
-		t.Errorf("GET / with admin disabled: code %d, want the login page", w.Code)
-	}
-}
-
-// The shell is public; the data behind it is not. Serving one page to everyone keeps a
-// single login UI, so what actually has to hold is that the page carries nothing worth
-// gating and that every data route still refuses an anonymous caller.
-func TestRootIsPublicShellButCarriesNoSecrets(t *testing.T) {
-	h, _, _ := testServer(t)
-
-	anon := do(t, h, "GET", "/", "", nil)
-	if anon.Code != 200 {
-		t.Fatalf("anonymous root: %d", anon.Code)
-	}
-	body := anon.Body.String()
-	if strings.Contains(body, testPassword) {
-		t.Fatal("the console shell contains the admin password")
-	}
-
-	// The shell must be inert without a session: the routes it calls all refuse.
-	for _, route := range []string{"/admin/forwards", "/admin/status"} {
-		if w := do(t, h, "GET", route, "", nil); w.Code != http.StatusUnauthorized {
-			t.Errorf("anonymous %s: got %d, want 401", route, w.Code)
-		}
-	}
-
-	// And an authenticated caller gets the same shell — the difference is the data.
-	c := adminCookie(t, h)
-	if in := do(t, h, "GET", "/", "", c); in.Body.String() != body {
-		t.Fatal("authenticated root served a different shell")
-	}
-	if w := do(t, h, "GET", "/admin/forwards", "", c); w.Code != 200 {
-		t.Fatalf("authenticated /admin/forwards: %d", w.Code)
+		t.Fatalf("%d mapping(s) created", n)
 	}
 }
 
@@ -353,17 +305,16 @@ func TestCapacityReturns429(t *testing.T) {
 
 func TestCloseEndpoint(t *testing.T) {
 	h, m, fr := testServer(t)
-	c := adminCookie(t, h)
 	post(t, h, `{"remote_port":8530}`)
 	id := m.List()[0].ID
 
-	if w := do(t, h, "DELETE", "/admin/forward/"+id, "", c); w.Code != 200 {
+	if w := do(t, h, "DELETE", "/admin/forward/"+id, ""); w.Code != 200 {
 		t.Fatalf("code %d: %s", w.Code, w.Body)
 	}
 	if !fr.sawSubcommand("cancel") {
 		t.Fatal("no ssh -O cancel issued")
 	}
-	if w := do(t, h, "DELETE", "/admin/forward/"+id, "", c); w.Code != 404 {
+	if w := do(t, h, "DELETE", "/admin/forward/"+id, ""); w.Code != 404 {
 		t.Fatalf("second close: code %d, want 404", w.Code)
 	}
 }
@@ -373,8 +324,7 @@ func TestEditUpdatesLabel(t *testing.T) {
 	post(t, h, `{"remote_port":8530,"label":"before"}`)
 	id := m.List()[0].ID
 
-	c := adminCookie(t, h)
-	if w := do(t, h, "PATCH", "/admin/forward/"+id, `{"label":"after"}`, c); w.Code != 200 {
+	if w := do(t, h, "PATCH", "/admin/forward/"+id, `{"label":"after"}`); w.Code != 200 {
 		t.Fatalf("admin edit: %d %s", w.Code, w.Body)
 	}
 	if got := m.List()[0].Label; got != "after" {
@@ -386,7 +336,7 @@ func TestListEndpointShape(t *testing.T) {
 	h, _, _ := testServer(t)
 	post(t, h, `{"remote_port":8530,"label":"mkdp"}`)
 
-	w := do(t, h, "GET", "/admin/forwards", "", adminCookie(t, h))
+	w := do(t, h, "GET", "/admin/forwards", "")
 	if w.Code != 200 {
 		t.Fatalf("code %d", w.Code)
 	}
@@ -407,7 +357,7 @@ func TestListEndpointShape(t *testing.T) {
 
 func TestUnknownPathIs404(t *testing.T) {
 	h, _, _ := testServer(t)
-	if w := do(t, h, "GET", "/nope", "", nil); w.Code != 404 {
+	if w := do(t, h, "GET", "/nope", ""); w.Code != 404 {
 		t.Fatalf("code %d, want 404", w.Code)
 	}
 }

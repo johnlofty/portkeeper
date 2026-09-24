@@ -494,3 +494,77 @@ func TestReapSkipsRemoteForwardsWhenNotChecking(t *testing.T) {
 		t.Fatalf("remote-forward reaped on a cycle that did not check it (%d)", n)
 	}
 }
+
+// A remote-forward of the daemon's own port would publish the console to the remote,
+// where nothing gates it. testCfg listens on 9996.
+func TestRemoteForwardOfTheListenPortIsRefused(t *testing.T) {
+	m, fr := testManager(t)
+	_, _, err := m.Open(openReq{host: "code", direction: dirRemote, localPort: 9996})
+	if !errors.Is(err, errSelfForward) {
+		t.Fatalf("got %v, want errSelfForward", err)
+	}
+	// Publishing it under a different remote port is the same exposure.
+	_, _, err = m.Open(openReq{host: "code", direction: dirRemote, localPort: 9996, remotePort: 19996})
+	if !errors.Is(err, errSelfForward) {
+		t.Fatalf("with a different remote port: got %v, want errSelfForward", err)
+	}
+	// A range is preflighted through the same validate().
+	_, err = m.OpenRange([]openReq{
+		{host: "code", direction: dirRemote, localPort: 9995},
+		{host: "code", direction: dirRemote, localPort: 9996},
+	})
+	if !errors.Is(err, errSelfForward) {
+		t.Fatalf("range covering the listen port: got %v, want errSelfForward", err)
+	}
+	if n := len(m.List()); n != 0 {
+		t.Fatalf("%d mapping(s) created", n)
+	}
+	fr.mu.Lock()
+	defer fr.mu.Unlock()
+	if len(fr.calls) != 0 {
+		t.Fatalf("a refused self-forward still reached ssh: %v", fr.calls)
+	}
+}
+
+func TestEditCannotMoveARemoteForwardOntoTheListenPort(t *testing.T) {
+	m, _ := testManager(t)
+	if _, _, err := m.Open(openReq{host: "code", direction: dirRemote, localPort: 3000}); err != nil {
+		t.Fatal(err)
+	}
+	self := 9996
+	if _, err := m.Edit("code:remote-forward:3000", editReq{localPort: &self}); !errors.Is(err, errSelfForward) {
+		t.Fatalf("got %v, want errSelfForward", err)
+	}
+	if v := m.List()[0]; v.LocalPort != 3000 {
+		t.Fatalf("the refused edit still moved the mapping: %+v", v)
+	}
+}
+
+// The daemon already holds its listen port, so a local-forward asking for it by name is
+// refused outright rather than silently handed some other port by the fallback.
+func TestLocalForwardOntoTheListenPortIsRefused(t *testing.T) {
+	m, _ := testManager(t)
+	_, _, err := m.Open(openReq{host: "code", direction: dirLocal, remotePort: 8530, localPort: 9996})
+	if !errors.Is(err, errSelfForward) {
+		t.Fatalf("got %v, want errSelfForward", err)
+	}
+
+	if _, _, err := openTest(m, 8530); err != nil {
+		t.Fatal(err)
+	}
+	self := 9996
+	if _, err := m.Edit("code:local-forward:8530", editReq{localPort: &self}); !errors.Is(err, errSelfForward) {
+		t.Fatalf("edit onto the listen port: got %v, want errSelfForward", err)
+	}
+
+	// Mirroring the remote's own 9996 is not asking for this port; it takes the ordinary
+	// fallback like any other busy port.
+	m.free = func(p int) bool { return p != 9996 }
+	v, _, err := openTest(m, 9996)
+	if err != nil {
+		t.Fatalf("mirroring remote 9996: %v", err)
+	}
+	if v.LocalPort == 9996 {
+		t.Fatal("the fallback handed out the daemon's own port")
+	}
+}
