@@ -17,6 +17,96 @@ Two directions, named after the ssh flags they become:
 This README describes what portkeeper is today. `DESIGN.md` records why it works this
 way, and what it used to be.
 
+## Quick start
+
+Portkeeper is a Mac app for Apple Silicon, macOS 14 or later. It needs your remote hosts
+as `Host` entries in `~/.ssh/config`, and `ssh <alias>` has to connect without a password
+prompt, from keys or an agent. Portkeeper never edits that file.
+
+1. **Download** `Portkeeper-v0.1.0-macos-arm64.zip` from the
+   [Releases page](https://github.com/johnlofty/portkeeper/releases). The repository is
+   private for now, so the page is only reachable by its collaborators.
+2. **Move `Portkeeper.app` to `/Applications`** and open it from there. Do this before the
+   next step: registering the background helper records where the app is, and a copy
+   registered from `~/Downloads` breaks the moment it moves.
+3. **Get past the first-launch block.** The app is ad-hoc signed and not notarized, so
+   macOS refuses to open it once. Either open System Settings > Privacy & Security and
+   click **Open Anyway**, or run
+
+   ```sh
+   xattr -dr com.apple.quarantine /Applications/Portkeeper.app
+   ```
+
+   and open it again. The Portkeeper icon appears in the menu bar.
+4. **Start the daemon.** Click the icon, then the gear, then **Background helper >
+   Register**. If macOS asks, allow Portkeeper in System Settings > General > Login Items.
+   Until that approval the helper is registered but never starts, and Settings says so.
+   Within a few seconds **Daemon** in Settings reads reachable. Turn on **Open at login**
+   there if you want the app back after a reboot.
+5. **Map a port.** Click the icon, then **Add mapping**. Pick a host in the left rail,
+   type the remote port, and click **Add mapping**. The row appears with an arrow pointing
+   at your Mac, and the open button beside it loads `http://127.0.0.1:<port>`.
+
+## Using it
+
+**The menu bar item** shows how many mappings are alive, or `!` when a host is
+reconnecting or the daemon cannot be reached. Click it for the popover: each host with its
+state, and under it each mapping as a remote chip, a cable and a Mac chip, with its label,
+a pin mark if it is kept across restarts, and an open button for local-forwards. The
+buttons at the bottom are **Add mapping**, **Open console** and **Quit**. Quitting the app
+leaves the daemon and every mapping running; the daemon belongs to launchd, not the app.
+
+**The console** is where mappings are made. Open it from the popover, or load
+<http://127.0.0.1:9996/> in any browser on the Mac. The left rail lists your hosts: the
+`Host` aliases from `~/.ssh/config` plus any you add there. Picking one shows its mappings
+as a table of cables. Each row reads left to right from the remote to your Mac, and **the
+arrow points where the port appears**: a local-forward brings a remote port to your Mac,
+so its arrow points right; a remote-forward publishes a Mac port on the remote, so its
+arrow points left.
+
+**Add mapping** opens a sheet:
+
+- **Local-forward** or **Remote-forward**, with a live diagram of what you are about to make.
+- **Remote port**, or a range such as `8000-8010` for one mapping per port.
+- **Local port**, blank to use the same number. If that port is busy on your Mac, a free
+  one is used and the row says so.
+- **Target host on the remote**, for a machine the remote can reach, such as a database
+  box. Leave it empty for the remote itself.
+- **Label**, **Expires after** (1h, 8h, 24h or never), **Keep across restarts** and
+  **Open in the browser when it is ready**.
+
+A mapping with **Keep across restarts** is pinned: it never expires and comes back on its
+own after the daemon or the Mac restarts. The row's menu offers **Edit**, pinning or
+unpinning, and **Close mapping**; closing a pinned mapping removes the pin too.
+
+**Listening on <host>** shows what the remote is actually running. Click **Discover**
+and the table lists every listening port with its process or docker container, a
+**Forward** button per row that opens the sheet already filled in, and an "already mapped"
+mark on ports you have. Nothing runs on the remote until you click Discover.
+
+**A worked example.** A Vite dev server on `code` prints `http://localhost:5173`. In the
+console, with `code` selected, click **Add mapping**, type `5173`, click **Add mapping**.
+Open the row's link and the page loads in your browser as `http://127.0.0.1:5173`. Tick
+**Keep across restarts** if you want it there every morning.
+
+**Where things live.** Pins are in `~/.config/portkeeper/pinned`, hosts you added in
+`~/.config/portkeeper/hosts`, the daemon's log at `/tmp/portkeeper.log`, and its ssh
+control sockets under `~/.ssh/sockets/`, separate from your own sessions.
+
+**If something is off.**
+
+- The popover says the daemon is not reachable: the helper is not registered or not yet
+  approved (Settings > Background helper), or a daemon from a repo checkout is running,
+  and only one can own `127.0.0.1:9996`.
+- A host stays **reconnecting**: `ssh <alias>` from Terminal has to work without a
+  prompt. The console shows the attempt count and when the next try is; the log shows why.
+- The first launch was refused: step 3 above. This is the price of an unsigned build,
+  not a sign anything is wrong with the download.
+
+**Uninstall.** Settings > Background helper > **Unregister**, turn off **Open at login**,
+quit, and delete `/Applications/Portkeeper.app`. Remove `~/.config/portkeeper` and
+`/tmp/portkeeper.log` if you want nothing left.
+
 ## How it works
 
 ```mermaid
@@ -59,29 +149,6 @@ other. Nothing points from `code` back at the daemon, because nothing there can 
 Every thirty seconds the daemon checks each master, restarts and replays a dead one with
 backoff, dials every local-forward to prove it still answers, and re-creates any pin
 whose mapping is missing.
-
-## Install the app
-
-Download `Portkeeper-<tag>-macos-arm64.zip` from the repository's
-[Releases page](https://github.com/johnlofty/portkeeper/releases). The repository is
-currently private, so that page is only reachable by its collaborators until it is made
-public.
-
-The build is Apple Silicon only. It is ad-hoc signed and **not notarized**, so on macOS 15
-and later a downloaded copy is blocked the first time you open it. To get past that:
-
-1. Unzip it and move `Portkeeper.app` to `/Applications` first, and launch it from there.
-   Registering the background helper records where the app is, so a copy registered from
-   `~/Downloads` breaks when it moves.
-2. Open it. When macOS refuses, go to System Settings > Privacy & Security and click
-   **Open Anyway**. Or clear the quarantine flag yourself:
-   `xattr -dr com.apple.quarantine /Applications/Portkeeper.app`
-3. In the app's Settings > Background helper, click **Register**. If macOS asks, approve it
-   once in System Settings > Login Items; until then the helper is registered but never
-   starts, and Settings says so.
-
-You need macOS 14 or later, OpenSSH with your hosts in `~/.ssh/config`, and ssh keys or an
-agent that let `ssh <host>` connect without a prompt.
 
 ## Install from the repo
 
@@ -180,7 +247,7 @@ The daemon reads environment variables; in the launchd plist they go under
 | Variable          | Default                                  | Meaning |
 | ----------------- | ---------------------------------------- | ------- |
 | `LG_LISTEN`       | `127.0.0.1:9996`                         | Console and API address; must be loopback |
-| `LG_HOSTS`        | `code`                                   | Comma-separated hosts whose masters open at startup |
+| `LG_HOSTS`        | none                                     | Comma-separated hosts whose connections open at startup; the repo's dev plist sets `code` |
 | `LG_SSH_CONFIG`   | `~/.ssh/config`                          | Where `Host` entries are discovered |
 | `LG_HOSTS_FILE`   | `~/.config/portkeeper/hosts`             | Hosts added in the console |
 | `LG_PINNED_FILE`  | `~/.config/portkeeper/pinned`            | Mappings kept across restarts |
@@ -230,8 +297,9 @@ ssh -o 'ControlPath=~/.ssh/sockets/portkeeper-%r@%h-%p' -O check code
                                              # is the daemon's master up
 ```
 
-The log starts with `listening on 127.0.0.1:9996, hosts [code]` and says
-`master code: up` a few seconds later. If it says `still not ready` on every retry, the
+The log starts with `listening on 127.0.0.1:9996, hosts [code]` (`hosts []` for a
+downloaded app, which opens connections on first use) and says `master code: up` a few
+seconds after a host is used. If it says `still not ready` on every retry, the
 host is unreachable or the connection is failing, and the console's rows for that host
 read **reconnecting** with the attempt count. `make status` greps `launchctl list` for
 `io.github.johnlofty.portkeeper`, which matches the helper's label too; the app's Settings

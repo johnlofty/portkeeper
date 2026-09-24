@@ -46,7 +46,7 @@ func loadConfig() (*Config, error) {
 
 	c := &Config{
 		Listen:        env("LG_LISTEN", "127.0.0.1:9996"),
-		EagerHosts:    splitHosts(env("LG_HOSTS", "code")),
+		EagerHosts:    splitHosts(env("LG_HOSTS", "")),
 		SSHConfigPath: expandHome(env("LG_SSH_CONFIG", "~/.ssh/config"), home),
 		HostsFile: expandHome(env("LG_HOSTS_FILE",
 			filepath.Join(home, ".config", "portkeeper", "hosts")), home),
@@ -57,9 +57,10 @@ func loadConfig() (*Config, error) {
 		ControlPath: expandHome(env("LG_CONTROL_PATH", "~/.ssh/sockets/portkeeper-%r@%h-%p"), home),
 	}
 
-	if len(c.EagerHosts) == 0 {
-		return nil, fmt.Errorf("LG_HOSTS is empty: nothing to forward to")
-	}
+	// No eager hosts is a fine configuration, and the one a downloaded copy starts with:
+	// every Host in ssh_config is offered and dialled on first use, and a pin brings its
+	// host up at startup anyway. The daemon used to insist on LG_HOSTS, which shipped a
+	// phantom "code" to everyone who was not its author.
 	if err := requireLoopback(c.Listen); err != nil {
 		return nil, err
 	}

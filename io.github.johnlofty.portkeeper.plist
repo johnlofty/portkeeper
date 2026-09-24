@@ -25,6 +25,10 @@
 	<dict>
 		<key>PATH</key>
 		<string>/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin</string>
+		<!-- The dev box. Its connection opens at startup; every other host in
+		     ssh_config is dialled on first use. A downloaded app sets nothing here. -->
+		<key>LG_HOSTS</key>
+		<string>code</string>
 	</dict>
 	<key>StandardOutPath</key>
 	<string>/tmp/portkeeper.log</string>
