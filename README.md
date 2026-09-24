@@ -16,6 +16,47 @@ Two directions, named after the ssh flags they become:
 
 `DESIGN.md` covers why it works this way, and what it used to be.
 
+## How it works
+
+```mermaid
+flowchart LR
+    subgraph mac["Your Mac"]
+        browser["Browser"]
+        console["Console<br/>127.0.0.1:9996, behind login"]
+        daemon["portkeeperd<br/>launchd agent"]
+        pins[("pinned mappings<br/>~/.config/local-gateway")]
+        master["OpenSSH ControlMaster<br/>one per host, private ControlPath"]
+        macport["127.0.0.1:8530"]
+        macsvc["Mac service<br/>localhost:3000"]
+    end
+
+    subgraph code["Remote dev box: code"]
+        sshd["sshd"]
+        dev["dev server<br/>localhost:8530"]
+        remoteport["127.0.0.1:3000"]
+        tool["remote tool"]
+    end
+
+    browser --> console --> daemon
+    daemon -->|"ssh -O forward, cancel, check<br/>ss for discovery"| master
+    daemon <-->|"re-created at startup<br/>and on every 30s tick"| pins
+    master ===|"one multiplexed SSH connection"| sshd
+
+    browser -.-> macport
+    macport -.->|"local-forward, ssh -L"| dev
+    tool -.-> remoteport
+    remoteport -.->|"remote-forward, ssh -R"| macsvc
+```
+
+Solid arrows are control: how a mapping is asked for and kept. The thick line is the one
+SSH connection the daemon owns per host. Dotted arrows are traffic through a mapping, and
+every one of them rides that thick line; ssh binds the listening end and delivers to the
+other. Nothing points from `code` back at the daemon, because nothing there can reach it.
+
+Every thirty seconds the daemon checks each master, restarts and replays a dead one with
+backoff, dials every local-forward to prove it still answers, and re-creates any pin
+whose mapping is missing.
+
 ## The console
 
 <http://127.0.0.1:9996/> on the Mac. Log in once per browser session; the cookie lasts
