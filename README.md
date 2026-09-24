@@ -24,7 +24,7 @@ flowchart LR
         browser["Browser"]
         console["Console<br/>127.0.0.1:9996, behind login"]
         daemon["portkeeperd<br/>launchd agent"]
-        pins[("pinned mappings<br/>~/.config/local-gateway")]
+        pins[("pinned mappings<br/>~/.config/portkeeper")]
         master["OpenSSH ControlMaster<br/>one per host, private ControlPath"]
         macport["127.0.0.1:8530"]
         macsvc["Mac service<br/>localhost:3000"]
@@ -66,7 +66,7 @@ click, and add hosts.
 
 Every route except the page itself, login and logout requires the session. There is no
 unauthenticated API. The password comes from `LG_ADMIN_PASSWORD`, or from
-`~/.config/local-gateway/admin-password` with mode 0600. Without one the daemon starts but
+`~/.config/portkeeper/admin-password` with mode 0600. Without one the daemon starts but
 can do nothing.
 
 ## Install
@@ -86,8 +86,8 @@ interactive sessions for a socket and never tears one of them down.
 
 ```sh
 make status                                  # is the agent loaded
-make logs                                    # tail /tmp/local-gateway.log
-ssh -o 'ControlPath=~/.ssh/sockets/local-gateway-%r@%h-%p' -O check code
+make logs                                    # tail /tmp/portkeeper.log
+ssh -o 'ControlPath=~/.ssh/sockets/portkeeper-%r@%h-%p' -O check code
                                              # is the daemon's master up
 ```
 
@@ -99,7 +99,7 @@ rows for that host read **reconnecting** with the attempt count.
 
 The console picks a host from a list rather than taking a typed name. It merges three
 sources: `LG_HOSTS`, the `Host` entries in `~/.ssh/config`, and hosts added in the console
-(persisted to `~/.config/local-gateway/hosts`).
+(persisted to `~/.config/portkeeper/hosts`).
 
 Any host in the list may be forwarded to, because reaching the list already required a
 login. `LG_HOSTS` marks the ones whose connection is opened eagerly at startup; every other
@@ -111,7 +111,7 @@ anything ssh might read as an option is rejected outright.
 ## Pinned mappings
 
 A mapping marked **keep across restarts** in the console is written to
-`~/.config/local-gateway/pinned` (0600, override with `LG_PINNED_FILE`) and re-created on
+`~/.config/portkeeper/pinned` (0600, override with `LG_PINNED_FILE`) and re-created on
 startup and on any reconcile tick that finds it missing. It is the one thing about a
 mapping that outlives the daemon.
 

@@ -59,8 +59,8 @@ func leftBehind(t *testing.T, path string) {
 
 func TestParseControlPathReadsTheExpandedPath(t *testing.T) {
 	out := "user dev\nhostname 203.0.113.7\nport 22\n" +
-		"controlpath /Users/dev/.ssh/sockets/local-gateway-dev@203.0.113.7-22\ncontrolpersist 600\n"
-	want := "/Users/dev/.ssh/sockets/local-gateway-dev@203.0.113.7-22"
+		"controlpath /Users/dev/.ssh/sockets/portkeeper-dev@203.0.113.7-22\ncontrolpersist 600\n"
+	want := "/Users/dev/.ssh/sockets/portkeeper-dev@203.0.113.7-22"
 	if got := parseControlPath(out); got != want {
 		t.Fatalf("parseControlPath = %q, want %q", got, want)
 	}

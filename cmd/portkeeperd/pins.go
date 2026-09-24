@@ -41,7 +41,7 @@ func (p pin) id() string {
 
 func (p pin) sameAs(q pin) bool { return p == q }
 
-// pinBook is the persisted set of pins, at ~/.config/local-gateway/pinned.
+// pinBook is the persisted set of pins, at ~/.config/portkeeper/pinned.
 type pinBook struct {
 	mu   sync.Mutex
 	file string

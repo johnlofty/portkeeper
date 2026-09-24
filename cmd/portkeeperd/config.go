@@ -98,15 +98,15 @@ func loadConfig() (*Config, error) {
 		EagerHosts:    splitHosts(env("LG_HOSTS", "code")),
 		SSHConfigPath: expandHome(env("LG_SSH_CONFIG", "~/.ssh/config"), home),
 		HostsFile: expandHome(env("LG_HOSTS_FILE",
-			filepath.Join(home, ".config", "local-gateway", "hosts")), home),
+			filepath.Join(home, ".config", "portkeeper", "hosts")), home),
 		PinnedFile: expandHome(env("LG_PINNED_FILE",
-			filepath.Join(home, ".config", "local-gateway", "pinned")), home),
+			filepath.Join(home, ".config", "portkeeper", "pinned")), home),
 		MaxForwards: envInt("LG_MAX_FORWARDS", 20),
 		DefaultTTL:  time.Duration(envInt("LG_DEFAULT_TTL", 28800)) * time.Second,
-		ControlPath: expandHome(env("LG_CONTROL_PATH", "~/.ssh/sockets/local-gateway-%r@%h-%p"), home),
+		ControlPath: expandHome(env("LG_CONTROL_PATH", "~/.ssh/sockets/portkeeper-%r@%h-%p"), home),
 		AdminPassword: loadAdminPassword(
 			expandHome(env("LG_ADMIN_PASSWORD_FILE",
-				filepath.Join(home, ".config", "local-gateway", "admin-password")), home)),
+				filepath.Join(home, ".config", "portkeeper", "admin-password")), home)),
 	}
 
 	if len(c.EagerHosts) == 0 {

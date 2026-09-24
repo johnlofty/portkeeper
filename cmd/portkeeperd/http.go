@@ -28,7 +28,7 @@ const (
 
 var (
 	errAdminDisabled = errors.New("admin is disabled: portkeeperd started with no password, " +
-		"from either LG_ADMIN_PASSWORD or ~/.config/local-gateway/admin-password")
+		"from either LG_ADMIN_PASSWORD or ~/.config/portkeeper/admin-password")
 	errNotAdmin = errors.New("admin session required")
 
 	errOpenWithRange = errors.New("open cannot be combined with a port range: it would put one browser window on the screen per port")

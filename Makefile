@@ -43,7 +43,7 @@ install: build
 	-launchctl unload $(AGENTS)/$(PLIST) 2>/dev/null
 	sed 's#__REPO__#$(REPO)#g' $(PLIST) > $(AGENTS)/$(PLIST)
 	launchctl load $(AGENTS)/$(PLIST)
-	@echo "loaded: $(LABEL) -- logs at /tmp/local-gateway.log"
+	@echo "loaded: $(LABEL) -- logs at /tmp/portkeeper.log"
 
 uninstall:
 	-launchctl unload $(AGENTS)/$(PLIST) 2>/dev/null
@@ -54,7 +54,7 @@ status:
 	@launchctl list | grep $(LABEL) || echo "$(LABEL) is not loaded"
 
 logs:
-	@tail -f /tmp/local-gateway.log
+	@tail -f /tmp/portkeeper.log
 
 clean:
 	rm -f $(BINARY)

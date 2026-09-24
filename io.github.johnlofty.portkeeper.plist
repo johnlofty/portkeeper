@@ -27,8 +27,8 @@
 		<string>/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin</string>
 	</dict>
 	<key>StandardOutPath</key>
-	<string>/tmp/local-gateway.log</string>
+	<string>/tmp/portkeeper.log</string>
 	<key>StandardErrorPath</key>
-	<string>/tmp/local-gateway.log</string>
+	<string>/tmp/portkeeper.log</string>
 </dict>
 </plist>

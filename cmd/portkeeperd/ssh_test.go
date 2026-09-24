@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-const testCP = "/tmp/lg-sockets/local-gateway-%r@%h-%p"
+const testCP = "/tmp/lg-sockets/portkeeper-%r@%h-%p"
 
 func testCfg() *Config {
 	return &Config{

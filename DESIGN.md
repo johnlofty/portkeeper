@@ -915,3 +915,19 @@ with its own threat model, rather than as the default this project started with.
 - The masterLog filter for "remote port forwarding failed" stays too, for the same reason:
   those two lines still replay on every `-O forward` and still collide with the
   interactive session.
+
+## Renames (2026-09-24)
+
+The project is now called portkeeper, and everything that carried the old name follows:
+
+| Was | Is |
+| --- | --- |
+| repo and module `local-gateway` | `github.com/johnlofty/portkeeper` |
+| `cmd/gatewayd`, `bin/gatewayd` | `cmd/portkeeperd`, `bin/portkeeperd` |
+| launchd label `com.alvin.local-gateway` | `io.github.johnlofty.portkeeper`, plist rendered at install with `__REPO__` filled in |
+| `~/.config/local-gateway/` | `~/.config/portkeeper/` (password, hosts, pins moved as-is) |
+| `/tmp/local-gateway.log` | `/tmp/portkeeper.log` |
+| ControlPath `~/.ssh/sockets/local-gateway-%r@%h-%p` | `~/.ssh/sockets/portkeeper-%r@%h-%p` |
+
+The `LG_` environment prefix is unchanged. Everything above this section uses the old
+names; it is a log, not a manual, and the names it records were the names at the time.

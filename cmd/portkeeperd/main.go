@@ -37,7 +37,7 @@ func main() {
 		log.Print("admin is DISABLED, which leaves this daemon unable to do anything: " +
 			"every route but / refuses, and / serves only the login page. There is no " +
 			"unauthenticated API any more. Either set LG_ADMIN_PASSWORD, or write the " +
-			"password to ~/.config/local-gateway/admin-password and chmod 600 it.")
+			"password to ~/.config/portkeeper/admin-password and chmod 600 it.")
 	}
 
 	run := execRunner{}
