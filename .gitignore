@@ -1,5 +1,5 @@
 # Compiled daemon — built by `make build`, not checked in.
-bin/gatewayd
+bin/portkeeperd
 
 # The admin password lives in ~/.config/local-gateway/admin-password, never here.
 *.password

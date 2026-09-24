@@ -5,7 +5,7 @@
 # of anything else -- installing a persistent background agent is a decision,
 # not a build step.
 
-BINARY  := bin/gatewayd
+BINARY  := bin/portkeeperd
 PLIST   := io.github.johnlofty.portkeeper.plist
 LABEL   := io.github.johnlofty.portkeeper
 AGENTS  := $(HOME)/Library/LaunchAgents
@@ -16,7 +16,7 @@ REPO    := $(shell pwd)
 all: build
 
 build:
-	go build -o $(BINARY) ./cmd/gatewayd
+	go build -o $(BINARY) ./cmd/portkeeperd
 
 test:
 	go test ./...

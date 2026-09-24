@@ -34,7 +34,7 @@ can do nothing.
 ## Install
 
 ```sh
-make install          # builds bin/gatewayd, loads the launchd agent
+make install          # builds bin/portkeeperd, loads the launchd agent
 ```
 
 That is the whole install. The daemon opens its own SSH connection to each host in

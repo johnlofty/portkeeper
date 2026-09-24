@@ -124,7 +124,7 @@ Daemon in Go (decision 3), remote client in shell (decision 4).
 
 | Path                                      | Role                                                                                                    |
 | ----------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `cmd/gatewayd/`                           | Go daemon. HTTP on `127.0.0.1:9996`, endpoints below. launchd `KeepAlive`, loopback-only bind           |
+| `cmd/portkeeperd/`                           | Go daemon. HTTP on `127.0.0.1:9996`, endpoints below. launchd `KeepAlive`, loopback-only bind           |
 | `io.github.johnlofty.portkeeper.plist`           | launchd agent, same shape as `io.github.johnlofty.claude-notify-relay.plist`                                      |
 | `bin/expose`                              | Remote client. POSIX shell, `curl` + `jq` — same pattern as `tmux-notify.sh`                            |
 | `web/index.html`                          | The console. Single file, `go:embed`ed into the daemon — no build step, no framework                    |

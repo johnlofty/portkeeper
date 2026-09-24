@@ -6,7 +6,7 @@
 	<string>io.github.johnlofty.portkeeper</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>/Users/dev/Project/local-gateway/bin/gatewayd</string>
+		<string>/Users/dev/Project/local-gateway/bin/portkeeperd</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>

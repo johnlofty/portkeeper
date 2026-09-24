@@ -31,7 +31,7 @@ func main() {
 	// second instance must lose here, while it still cannot do any damage.
 	ln, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
-		log.Fatalf("listen %s: %v (is another gatewayd already running?)", cfg.Listen, err)
+		log.Fatalf("listen %s: %v (is another portkeeperd already running?)", cfg.Listen, err)
 	}
 	if !cfg.adminEnabled() {
 		log.Print("admin is DISABLED, which leaves this daemon unable to do anything: " +

@@ -27,7 +27,7 @@ const (
 )
 
 var (
-	errAdminDisabled = errors.New("admin is disabled: gatewayd started with no password, " +
+	errAdminDisabled = errors.New("admin is disabled: portkeeperd started with no password, " +
 		"from either LG_ADMIN_PASSWORD or ~/.config/local-gateway/admin-password")
 	errNotAdmin = errors.New("admin session required")
 
