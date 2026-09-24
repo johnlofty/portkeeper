@@ -11,10 +11,12 @@ jobs:
     # SDK is what proves the app compiles for it. Apple Silicon runner, so the artifact is arm64.
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+          # No dependencies, so no go.sum for the module cache to key on.
+          cache: false
       - name: go
         run: |
           test -z "$(gofmt -l ./cmd)" || { gofmt -l ./cmd; exit 1; }
@@ -28,7 +30,7 @@ jobs:
           swift test
       - name: app bundle
         run: make dist VERSION=ci-${GITHUB_SHA::7}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Portkeeper-macos-arm64
           path: dist/*.zip

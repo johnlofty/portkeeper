@@ -12,10 +12,12 @@ jobs:
   release:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+          # No dependencies, so no go.sum for the module cache to key on.
+          cache: false
       - name: build and zip
         # The version comes from the tag, not `git describe`: checkout is shallow and has no tags.
         run: make dist VERSION=${{ github.ref_name }}
@@ -34,7 +36,7 @@ jobs:
             --title "Portkeeper ${{ github.ref_name }}" \
             --generate-notes \
             --notes "Apple Silicon build, ad-hoc signed and not notarized. See the README for how to open a downloaded copy."
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         with:
           name: Portkeeper-macos-arm64
