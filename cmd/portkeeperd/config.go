@@ -67,7 +67,6 @@ func loadConfig() (*Config, error) {
 		SSHConfigPath: expandHome(env("LG_SSH_CONFIG", "~/.ssh/config"), home),
 		HostsFile: expandHome(env("LG_HOSTS_FILE",
 			filepath.Join(home, ".config", "portkeeper", "hosts.conf")), home),
-		LegacyHostsFile: filepath.Join(home, ".config", "portkeeper", "hosts"),
 		SSHWrapper: expandHome(env("LG_SSH_WRAPPER",
 			filepath.Join(home, ".config", "portkeeper", "ssh_config")), home),
 		KnownHostsFile: expandHome(env("LG_KNOWN_HOSTS",
@@ -78,6 +77,10 @@ func loadConfig() (*Config, error) {
 		DefaultTTL:  time.Duration(envInt("LG_DEFAULT_TTL", 28800)) * time.Second,
 		ControlPath: expandHome(env("LG_CONTROL_PATH", "~/.ssh/sockets/portkeeper-%r@%h-%p"), home),
 	}
+
+	// The old alias list lived beside the new file, so a daemon pointed at other files
+	// (a test, a second instance) never migrates the real one.
+	c.LegacyHostsFile = filepath.Join(filepath.Dir(c.HostsFile), "hosts")
 
 	// No eager hosts is a fine configuration, and the one a downloaded copy starts with:
 	// every Host in ssh_config is offered and dialled on first use, and a pin brings its

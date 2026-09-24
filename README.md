@@ -89,8 +89,10 @@ Open the row's link and the page loads in your browser as `http://127.0.0.1:5173
 **Keep across restarts** if you want it there every morning.
 
 **Where things live.** Pins are in `~/.config/portkeeper/pinned`, hosts you added in
-`~/.config/portkeeper/hosts`, the daemon's log at `/tmp/portkeeper.log`, and its ssh
-control sockets under `~/.ssh/sockets/`, separate from your own sessions.
+`~/.config/portkeeper/hosts.conf` (ssh_config `Host` blocks), the host keys they record in
+`~/.config/portkeeper/known_hosts`, the daemon's log at `/tmp/portkeeper.log`, and its ssh
+control sockets under `~/.ssh/sockets/`, separate from your own sessions. Portkeeper reads
+`~/.ssh/config` and never writes to it.
 
 **If something is off.**
 
@@ -176,8 +178,12 @@ mapping; launchd owns it.
 
 <http://127.0.0.1:9996/> on the Mac (or `localhost:9996`). The left rail lists hosts: the
 `LG_HOSTS` entries, the `Host` aliases in `~/.ssh/config` (patterns such as `Host *`
-are skipped), and any you add there (saved to
-`~/.config/portkeeper/hosts`). Picking one shows its mappings as a table of cables, remote
+are skipped), and any you add there. **Add host** takes what an ssh config entry has: an
+alias, host name, user, port, identity file and optionally a jump host. It saves them to
+`~/.config/portkeeper/hosts.conf`, then connects once to check they work. Every ssh the
+daemon runs reads that file first and then your own `~/.ssh/config`, so the settings you
+entered win and anything you left blank comes from your config. A host added this way is
+not visible to `ssh` in a terminal; your ssh config is never changed. Picking one shows its mappings as a table of cables, remote
 port on one side and Mac port on the other, with the arrow pointing where the port
 appears, and a row's state (alive, dead, or reconnecting with the attempt count).
 
@@ -248,14 +254,16 @@ The daemon reads environment variables; in the launchd plist they go under
 | `LG_LISTEN`       | `127.0.0.1:9996`                         | Console and API address; must be loopback |
 | `LG_HOSTS`        | none                                     | Comma-separated hosts whose connections open at startup; the repo's dev plist sets `code` |
 | `LG_SSH_CONFIG`   | `~/.ssh/config`                          | Where `Host` entries are discovered |
-| `LG_HOSTS_FILE`   | `~/.config/portkeeper/hosts`             | Hosts added in the console |
+| `LG_HOSTS_FILE`   | `~/.config/portkeeper/hosts.conf`        | Hosts added in the console, as ssh_config |
+| `LG_SSH_WRAPPER`  | `~/.config/portkeeper/ssh_config`        | Generated config every daemon ssh gets with `-F` |
+| `LG_KNOWN_HOSTS`  | `~/.config/portkeeper/known_hosts`       | Where keys of console-added hosts are recorded |
 | `LG_PINNED_FILE`  | `~/.config/portkeeper/pinned`            | Mappings kept across restarts |
 | `LG_MAX_FORWARDS` | `20`                                     | Cap on mappings |
 | `LG_DEFAULT_TTL`  | `28800` (seconds)                        | Expiry when a request gives none |
 | `LG_CONTROL_PATH` | `~/.ssh/sockets/portkeeper-%r@%h-%p`     | The daemon's own ControlPath |
 
-Hosts not in `LG_HOSTS` are dialled on first use. The hosts and pinned files are written
-0600 in a 0700 directory. Both launchd jobs log to `/tmp/portkeeper.log`.
+Hosts not in `LG_HOSTS` are dialled on first use. The hosts, wrapper and pinned files are
+written 0600 in a 0700 directory. Both launchd jobs log to `/tmp/portkeeper.log`.
 
 ## Behaviors worth knowing
 

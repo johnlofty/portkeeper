@@ -201,10 +201,6 @@
   .host-sub.warn { color: var(--amber); }
 
   .side-add { padding: 6px 4px 0; }
-  .addhost { display: flex; flex-direction: column; gap: 8px; padding: 8px 6px 0; }
-  .addhost label { font: 500 12px var(--sans); }
-  .addhost .row-btns { display: flex; gap: 6px; }
-  .addhost .err { margin: 0; }
 
   .side-foot { padding: 0 10px; display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--caption); }
   .side-foot div { overflow-wrap: anywhere; }
@@ -491,6 +487,32 @@
 
   .sheet-btns { display: flex; justify-content: flex-end; gap: 8px; padding-top: 4px; }
 
+  /* ---- the host sheet ----------------------------------------------- */
+
+  .port-fld { flex: 0 0 110px; }
+  .ferr { font-size: 12px; color: var(--amber); }
+  input[type="text"][aria-invalid="true"] { border-color: var(--amber-dot); }
+  input[type="text"]:disabled { color: var(--ink2); background: var(--window); }
+  details.more > summary { cursor: pointer; font: 500 13px var(--sans); color: var(--ink2); width: max-content; }
+  details.more[open] > summary { margin-bottom: 14px; }
+  details.more > .stack { gap: 14px; }
+  .stanza-cap { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-size: 12px; color: var(--caption); }
+  .stanza-cap .mono { font-size: 12px; }
+  pre.stanza {
+    margin: 0; padding: 10px 12px; overflow-x: auto;
+    font: 12px/1.6 var(--mono); color: var(--ink);
+    background: var(--window); border: 1px solid var(--hair); border-radius: 6px;
+  }
+  pre.stanza .fixed { color: var(--caption); }
+  .test-note {
+    margin: 0; padding: 8px 10px; border-radius: 0 6px 6px 0; font-size: 12px;
+    border-left: 3px solid var(--live); background: var(--window); color: var(--ink2);
+    overflow-wrap: anywhere;
+  }
+  .test-note[data-kind="fail"] { border-left-color: var(--amber-dot); color: var(--amber); }
+  .host-note { font-size: 12px; color: var(--caption); }
+  .host-note.warn { color: var(--amber); }
+
   /* ---- narrow ------------------------------------------------------- */
 
   @media (max-width: 1100px) {
@@ -541,18 +563,9 @@
     <div class="side-title">Hosts</div>
     <ul class="host-list" id="host-list"></ul>
     <div class="side-add">
-      <button type="button" class="btn ghost small" id="addhost-toggle" aria-expanded="false" aria-controls="addhost">
+      <button type="button" class="btn ghost small" id="addhost-open" aria-haspopup="dialog">
         <svg class="ico" width="14" height="14" viewBox="0 0 24 24" stroke-width="1.6" aria-hidden="true"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>Add host
       </button>
-      <form class="addhost hidden" id="addhost">
-        <label for="addhost-name">SSH alias</label>
-        <input type="text" class="mono" id="addhost-name" name="alias" autocomplete="off" spellcheck="false" placeholder="box2">
-        <div class="row-btns">
-          <button type="submit" class="btn primary small" id="addhost-save">Add host</button>
-          <button type="button" class="btn ghost small" id="addhost-cancel">Cancel</button>
-        </div>
-        <p class="err hidden" id="addhost-err" role="alert"></p>
-      </form>
     </div>
     <span class="grow"></span>
     <div class="side-foot">
@@ -579,8 +592,10 @@
         <div class="titles">
           <h1 id="host-name"></h1>
           <div class="host-info" id="host-info"></div>
+          <div class="host-note hidden" id="host-note"></div>
         </div>
         <div class="head-btns">
+          <button type="button" class="btn ghost hidden" id="host-edit">Edit host</button>
           <button type="button" class="btn ghost hidden" id="host-remove">Remove host</button>
           <button type="button" class="btn primary" id="add-open" title="Add a mapping" aria-label="Add a mapping">
             <svg class="ico" width="14" height="14" viewBox="0 0 24 24" stroke-width="2" aria-hidden="true"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>Add
@@ -722,6 +737,80 @@
   </form>
 </dialog>
 
+<!-- A host is what ssh calls one: a Host block. The daemon writes it to its own
+     hosts.conf; ~/.ssh/config is only ever read. -->
+<dialog class="sheet" id="hsheet" aria-labelledby="hsheet-title">
+  <form id="host-form" novalidate>
+    <h2 id="hsheet-title">Add host</h2>
+
+    <div class="fld">
+      <label for="h-alias">Alias</label>
+      <input type="text" class="mono" id="h-alias" name="alias" autocomplete="off" spellcheck="false" placeholder="box2">
+      <div class="hint">The name you pick it by. Letters, digits, dot, dash and underscore.</div>
+      <div class="ferr hidden" id="h-alias-err"></div>
+    </div>
+
+    <div class="fld">
+      <label for="h-hostname">Host name</label>
+      <input type="text" class="mono" id="h-hostname" name="hostname" autocomplete="off" spellcheck="false" placeholder="192.168.1.20 or box2.example.com">
+      <div class="hint">An address or DNS name. Pasting user@host:port fills in all three.</div>
+      <div class="ferr hidden" id="h-hostname-err"></div>
+    </div>
+
+    <div class="pair">
+      <div class="fld">
+        <label for="h-user">User</label>
+        <input type="text" class="mono" id="h-user" name="user" autocomplete="off" spellcheck="false" placeholder="from your ssh config">
+        <div class="ferr hidden" id="h-user-err"></div>
+      </div>
+      <div class="fld port-fld">
+        <label for="h-port">Port</label>
+        <input type="text" class="mono" id="h-port" name="port" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="22">
+        <div class="ferr hidden" id="h-port-err"></div>
+      </div>
+    </div>
+
+    <div class="fld">
+      <label for="h-key">Identity file</label>
+      <input type="text" class="mono" id="h-key" name="identity_file" list="h-keys" autocomplete="off" spellcheck="false" placeholder="~/.ssh/id_ed25519">
+      <datalist id="h-keys"></datalist>
+      <div class="hint">Optional. A key with a passphrase must already be unlocked in the agent or Keychain.</div>
+      <div class="ferr hidden" id="h-identity_file-err"></div>
+    </div>
+
+    <details class="more" id="h-more">
+      <summary>More</summary>
+      <div class="stack">
+        <div class="fld">
+          <label for="h-jump">Jump host</label>
+          <input type="text" class="mono" id="h-jump" name="proxy_jump" autocomplete="off" spellcheck="false" placeholder="bastion">
+          <div class="hint">Connect through another host first. [user@]host[:port], or several separated by commas.</div>
+          <div class="ferr hidden" id="h-proxy_jump-err"></div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" role="switch" id="h-only" checked>
+          <span class="track" aria-hidden="true"></span>
+          <span class="switch-text"><span>Use only this key</span><span class="hint">IdentitiesOnly. Stops ssh offering every key in the agent first.</span></span>
+        </label>
+      </div>
+    </details>
+
+    <div class="stack">
+      <div class="stanza-cap"><span>Saved to <span class="mono">~/.config/portkeeper/hosts.conf</span></span><span>Your ~/.ssh/config is not changed</span></div>
+      <pre class="stanza" id="h-stanza" aria-label="What Save writes"></pre>
+    </div>
+
+    <p class="err hidden" id="host-err" role="alert"></p>
+    <p class="test-note hidden" id="host-test" role="status"></p>
+
+    <div class="sheet-btns">
+      <button type="button" class="btn ghost" id="host-cancel">Cancel</button>
+      <button type="button" class="btn ghost hidden" id="host-keep">Keep anyway</button>
+      <button type="submit" class="btn primary" id="host-submit">Save and test</button>
+    </div>
+  </form>
+</dialog>
+
 <script>
 (function () {
   "use strict";
@@ -740,10 +829,28 @@
   var topCount   = document.getElementById("top-count");
 
   var hostListEl = document.getElementById("host-list");
-  var addHostBtn = document.getElementById("addhost-toggle");
-  var addHostEl  = document.getElementById("addhost");
-  var addHostIn  = document.getElementById("addhost-name");
-  var addHostErr = document.getElementById("addhost-err");
+  var addHostBtn = document.getElementById("addhost-open");
+  var hostEdit   = document.getElementById("host-edit");
+  var hostNote   = document.getElementById("host-note");
+  var hsheet     = document.getElementById("hsheet");
+  var hostForm   = document.getElementById("host-form");
+  var hsheetTitle = document.getElementById("hsheet-title");
+  var hostErr    = document.getElementById("host-err");
+  var hostTest   = document.getElementById("host-test");
+  var hostSubmit = document.getElementById("host-submit");
+  var hostKeep   = document.getElementById("host-keep");
+  var hostMore   = document.getElementById("h-more");
+  var hostStanza = document.getElementById("h-stanza");
+  var keyList    = document.getElementById("h-keys");
+  var hf = {
+    alias: document.getElementById("h-alias"),
+    hostname: document.getElementById("h-hostname"),
+    user: document.getElementById("h-user"),
+    port: document.getElementById("h-port"),
+    identity_file: document.getElementById("h-key"),
+    proxy_jump: document.getElementById("h-jump")
+  };
+  var hostOnly   = document.getElementById("h-only");
   var daemonLine = document.getElementById("daemon-line");
 
   var flashEl    = document.getElementById("flash");
@@ -972,9 +1079,11 @@
         var data = null;
         try { data = txt ? JSON.parse(txt) : null; } catch (e) { data = null; }
         if (!res.ok) {
-          throw new Error((data && typeof data.error === "string" && data.error)
+          var e = new Error((data && typeof data.error === "string" && data.error)
             ? data.error
             : "HTTP " + res.status);
+          if (data && typeof data.field === "string") e.field = data.field;
+          throw e;
         }
         return data;
       });
@@ -1068,7 +1177,7 @@
 
   function sidebarLine(h) {
     var st = hostState(h.alias);
-    return [h.alias, h.hostname || "", st, st === "retry" ? retryText(h.alias) : "",
+    return [h.alias, h.hostname || "", h.incomplete ? 1 : 0, st, st === "retry" ? retryText(h.alias) : "",
       (hostHealth[h.alias] || {}).last_error || "", h.alias === selected ? 1 : 0].join("\u0001");
   }
 
@@ -1097,7 +1206,9 @@
       top.append(dot, el("span", "mono", h.alias));
       b.appendChild(top);
 
-      if (st === "retry") {
+      if (h.incomplete) {
+        b.appendChild(el("div", "host-sub warn", "needs a host name"));
+      } else if (st === "retry") {
         b.appendChild(el("div", "host-sub warn", "reconnecting"));
         var rt = retryText(h.alias);
         if (rt) b.appendChild(el("div", "host-sub", rt));
@@ -1155,34 +1266,195 @@
     });
   }
 
-  function toggleAddHost(show) {
-    addHostEl.classList.toggle("hidden", !show);
-    addHostBtn.classList.toggle("hidden", show);
-    addHostBtn.setAttribute("aria-expanded", show ? "true" : "false");
-    clearErr(addHostErr);
-    if (show) { addHostIn.value = ""; addHostIn.focus(); }
-    else addHostBtn.focus();
+  /* ---- the host sheet ---------------------------------------------- */
+
+  // hostMode is "add" until the host exists on the daemon, then "edit": a save that
+  // worked and a test that failed leaves the sheet open, and the next Save must update
+  // that host rather than try to add it a second time.
+  var hostMode = "add", hostAlias = "", hostOpener = null;
+
+  function fieldErr(name, message) {
+    var input = hf[name], node = document.getElementById("h-" + name + "-err");
+    if (!input || !node) return false;
+    input.setAttribute("aria-invalid", message ? "true" : "false");
+    node.textContent = message || "";
+    node.classList.toggle("hidden", !message);
+    return true;
   }
 
-  addHostBtn.addEventListener("click", function () { toggleAddHost(true); });
-  document.getElementById("addhost-cancel").addEventListener("click", function () { toggleAddHost(false); });
-  addHostEl.addEventListener("keydown", function (ev) {
-    if (ev.key === "Escape") { ev.preventDefault(); toggleAddHost(false); }
+  function clearHostErrs() {
+    Object.keys(hf).forEach(function (k) { fieldErr(k, ""); });
+    clearErr(hostErr);
+    hostTest.classList.add("hidden");
+    hostKeep.classList.add("hidden");
+  }
+
+  // "pi@192.168.1.20:2222" typed or pasted into Host name fills user and port too.
+  function splitHostname() {
+    var v = hf.hostname.value.trim();
+    var m = v.match(/^([^@\s]+)@([^@\s:]+|\[[0-9A-Fa-f:]+\])(?::(\d+))?$/) ||
+            v.match(/^()([^@\s:]+):(\d+)$/);
+    if (!m) return;
+    if (m[1]) hf.user.value = m[1];
+    hf.hostname.value = m[2].replace(/^\[|\]$/g, "");
+    if (m[3]) hf.port.value = m[3];
+  }
+
+  function hostBody() {
+    var port = hf.port.value.trim();
+    return {
+      alias: hf.alias.value.trim(),
+      hostname: hf.hostname.value.trim(),
+      user: hf.user.value.trim(),
+      port: /^\d+$/.test(port) ? parseInt(port, 10) : (port ? -1 : 0),
+      identity_file: hf.identity_file.value.trim(),
+      identities_only: hostOnly.checked,
+      proxy_jump: hf.proxy_jump.value.trim()
+    };
+  }
+
+  // The preview is drawn the way the daemon's renderHostsFile writes it, so what the
+  // sheet shows is what Save puts in the file.
+  function paintStanza() {
+    var b = hostBody();
+    hostStanza.textContent = "";
+    function line(text, fixed) {
+      hostStanza.appendChild(fixed ? el("span", "fixed", text + "\n") : document.createTextNode(text + "\n"));
+    }
+    line("Host " + (b.alias || "…"));
+    line("  HostName " + (b.hostname || "…"));
+    if (b.user) line("  User " + b.user);
+    if (b.port > 0) line("  Port " + b.port);
+    if (b.identity_file) {
+      line('  IdentityFile "' + b.identity_file + '"');
+      if (b.identities_only) line("  IdentitiesOnly yes");
+    }
+    if (b.proxy_jump) line("  ProxyJump " + b.proxy_jump.replace(/\s+/g, ""));
+    line("  StrictHostKeyChecking accept-new", true);
+    line("  UserKnownHostsFile ~/.config/portkeeper/known_hosts ~/.ssh/known_hosts", true);
+  }
+
+  function loadIdentities() {
+    api("GET", API + "/identities").then(function (names) {
+      keyList.textContent = "";
+      (Array.isArray(names) ? names : []).forEach(function (n) {
+        var o = document.createElement("option");
+        o.value = String(n);
+        keyList.appendChild(o);
+      });
+    }).catch(function () { /* suggestions only */ });
+  }
+
+  function openHostSheet(mode, alias, opener) {
+    hostMode = mode;
+    hostAlias = alias || "";
+    hostOpener = opener || document.activeElement;
+    clearHostErrs();
+    var h = (mode === "edit" && bookEntry(alias)) || {};
+    hf.alias.value = h.alias || "";
+    hf.hostname.value = h.hostname || "";
+    hf.user.value = h.user || "";
+    hf.port.value = h.port ? String(h.port) : "";
+    hf.identity_file.value = h.identity_file || "";
+    hf.proxy_jump.value = h.proxy_jump || "";
+    hostOnly.checked = mode === "add" || !h.identity_file || !!h.identities_only;
+    hostMore.open = !!h.proxy_jump;
+    hf.alias.disabled = mode === "edit";
+    hsheetTitle.textContent = mode === "edit" ? "Edit " + alias : "Add host";
+    hostSubmit.textContent = "Save and test";
+    hostSubmit.disabled = false;
+    paintStanza();
+    loadIdentities();
+
+    if (typeof hsheet.showModal === "function") {
+      if (!hsheet.open) hsheet.showModal();
+    } else {
+      hsheet.classList.add("fallback");
+      hsheet.setAttribute("open", "");
+    }
+    (mode === "edit" ? hf.hostname : hf.alias).focus();
+  }
+
+  function closeHostSheet() {
+    if (!hsheet.open && !hsheet.hasAttribute("open")) return;
+    if (typeof hsheet.close === "function") hsheet.close();
+    else hsheet.removeAttribute("open");
+    var o = hostOpener;
+    hostOpener = null;
+    if (o && document.contains(o) && typeof o.focus === "function") o.focus();
+  }
+
+  hsheet.addEventListener("cancel", function (ev) { ev.preventDefault(); closeHostSheet(); });
+  document.getElementById("host-cancel").addEventListener("click", closeHostSheet);
+  hostKeep.addEventListener("click", closeHostSheet);
+  addHostBtn.addEventListener("click", function () { openHostSheet("add", "", addHostBtn); });
+  hostEdit.addEventListener("click", function () {
+    if (selected) openHostSheet("edit", selected, hostEdit);
   });
-  addHostEl.addEventListener("submit", function (ev) {
+
+  Object.keys(hf).forEach(function (k) {
+    hf[k].addEventListener("input", function () { fieldErr(k, ""); paintStanza(); });
+  });
+  hostOnly.addEventListener("change", paintStanza);
+  hf.hostname.addEventListener("change", function () { splitHostname(); paintStanza(); });
+  hf.hostname.addEventListener("paste", function () {
+    setTimeout(function () { splitHostname(); paintStanza(); }, 0);
+  });
+
+  function showTest(kind, text) {
+    hostTest.dataset.kind = kind;
+    hostTest.textContent = text;
+    hostTest.classList.remove("hidden");
+  }
+
+  // Save, then connect once with what was saved. A host that is off right now can still
+  // be added: a failed test keeps the sheet open with ssh's reason, and Keep anyway.
+  hostForm.addEventListener("submit", function (ev) {
     ev.preventDefault();
-    var alias = addHostIn.value.trim();
-    if (!alias) { addHostIn.focus(); return; }
-    clearErr(addHostErr);
-    api("POST", API + "/hosts", { alias: alias }).then(function () {
-      toggleAddHost(false);
+    clearHostErrs();
+    var body = hostBody();
+    if (!body.alias) { fieldErr("alias", "Enter an alias."); hf.alias.focus(); return; }
+    if (!body.hostname) { fieldErr("hostname", "Enter the host's address or DNS name."); hf.hostname.focus(); return; }
+    if (body.port < 0) { fieldErr("port", "Port must be a number between 1 and 65535."); hf.port.focus(); return; }
+
+    var alias = hostMode === "edit" ? hostAlias : body.alias;
+    var save = hostMode === "edit"
+      ? api("PUT", API + "/hosts/" + encodeURIComponent(alias), body)
+      : api("POST", API + "/hosts", body);
+
+    hostSubmit.disabled = true;
+    hostSubmit.textContent = "Saving…";
+    save.then(function () {
+      hostMode = "edit";
+      hostAlias = alias;
+      hf.alias.disabled = true;
       selected = alias;
       store(alias);
       statusStale = true;
-      return loadHosts();
+      delete probeCache[alias];
+      loadHosts();
+      hostSubmit.textContent = "Connecting…";
+      return api("POST", API + "/hosts/" + encodeURIComponent(alias) + "/test").then(function (res) {
+        if (res && res.ok) {
+          closeHostSheet();
+          flash("added", "Saved " + alias + " and connected." +
+            (res.fingerprint ? " Host key " + res.fingerprint + "." : ""));
+          return;
+        }
+        showTest("fail", "Saved, but could not connect: " + ((res && res.error) || "ssh gave no reason") +
+          ". Change the settings and save again, or keep it as it is.");
+        hostKeep.classList.remove("hidden");
+      });
     }).catch(function (err) {
-      showErr(addHostErr, msgOf(err, "That host was not accepted."));
-      addHostIn.focus();
+      if (!(err && err.field && fieldErr(err.field, err.message))) {
+        showErr(hostErr, msgOf(err, "That host was not saved."));
+      } else if (hf[err.field]) {
+        if (err.field === "proxy_jump") hostMore.open = true;
+        hf[err.field].focus();
+      }
+    }).then(function () {
+      hostSubmit.disabled = false;
+      hostSubmit.textContent = hostMode === "edit" && !hostTest.classList.contains("hidden") ? "Save and test again" : "Save and test";
     });
   });
 
@@ -1228,8 +1500,9 @@
     hostNameEl.textContent = selected;
     var parts = [];
     if (h.hostname && h.hostname !== selected) {
-      parts.push((h.user ? h.user + "@" : "") + h.hostname);
+      parts.push((h.user ? h.user + "@" : "") + h.hostname + (h.port && h.port !== 22 ? ":" + h.port : ""));
     }
+    if (h.proxy_jump) parts.push("via " + h.proxy_jump);
     if (st === "up") parts.push("connected");
     else if (st === "retry") {
       var rt = retryText(selected);
@@ -1239,9 +1512,29 @@
     var le = (hostHealth[selected] || {}).last_error;
     hostInfoEl.title = st === "retry" && le ? String(le) : "";
 
-    // Only a host typed in here can be taken out again; the rest come from config.
-    hostRemove.classList.toggle("hidden", h.source !== "manual");
+    // Only a host added here can be changed or taken out again; the rest come from
+    // config, and the user's ssh config is theirs.
+    var manual = h.source === "manual";
+    hostRemove.classList.toggle("hidden", !manual);
     hostRemove.setAttribute("aria-label", "Remove host " + selected);
+    hostEdit.classList.toggle("hidden", !manual);
+    hostEdit.setAttribute("aria-label", "Edit host " + selected);
+
+    var note = "", warn = false;
+    if (h.incomplete) {
+      note = "Needs a host name before it can connect. It was added by an older version that saved only the alias.";
+      warn = true;
+    } else if (h.shadowed) {
+      note = "Your ~/.ssh/config also defines " + selected + ". Portkeeper uses the settings saved here; a terminal uses yours.";
+      warn = true;
+    } else if (h.source === "ssh-config") {
+      note = "Defined in ~/.ssh/config. Edit it there.";
+    } else if (h.source === "eager") {
+      note = "Set in the daemon's LG_HOSTS, and connected at startup.";
+    }
+    hostNote.textContent = note;
+    hostNote.classList.toggle("warn", warn);
+    hostNote.classList.toggle("hidden", !note);
   }
 
   /* ---- rows ---------------------------------------------------------- */

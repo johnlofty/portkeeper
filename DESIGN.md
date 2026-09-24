@@ -1175,8 +1175,10 @@ lives under `~/.config/portkeeper/`, in two files the app owns:
   Every path is written absolute (through `expandHome`) and every comment gets its own
   line, because ssh_config has no trailing comments: `Include a # note` is three globs.
 
-  The order matters. ssh keeps the first value it sees, so a portkeeper stanza's `User`
-  wins over a `Host *` default in the user's config, while anything the stanza leaves out
+  The order matters. ssh keeps the first value it sees for most settings, so a portkeeper
+  stanza's `User` wins over a `Host *` default in the user's config (`IdentityFile` is
+  the exception: ssh collects every one and offers them in order, so the stanza's key is
+  tried first and a `Host *` key after it), while anything the stanza leaves out
   (`ServerAliveInterval`, `UseKeychain`, `AddKeysToAgent`) still comes from there.
   `Match all` has to come before the Includes, because an `Include` inside a `Host` block
   applies only to that block, and here it would apply only to the last portkeeper host.
@@ -1318,3 +1320,32 @@ For an `ssh-config` host, the host header shows its fields read-only with the no
    `~/.config/portkeeper/known_hosts` gains exactly one line, and nothing under `~/.ssh/`
    changes. Then change the port to a closed one: the
    master exits, the mapping shows reconnecting, and the host health shows ssh's refusal.
+
+### As built (2026-09-24)
+
+Implemented as designed, with these differences found on the way:
+
+- **Remove refuses a host that is in use.** `DELETE /api/hosts/{alias}` answers 409 while
+  any mapping or pin names the host. Stopping its master and dropping it from the book
+  would have left a pin retrying against an unknown host on every tick, forever.
+- **The old alias file sits next to `HostsFile`**, so pointing `LG_HOSTS_FILE` elsewhere
+  (a test, a second daemon) never migrates the real one. It is kept, holding only the
+  aliases that still need a host name, and removed once none do.
+- **The fingerprint is shown once**, in the message after a successful Save and test,
+  rather than kept on the host page. Nothing stores it, and `ssh-keygen -F` can answer
+  again at any time.
+- **`argvTest` is built by hand.** ssh keeps the first `-o` it sees, so a
+  `ControlPath=none` after `sshArgv`'s own ControlPath would have been ignored, and the
+  test would have ridden on the daemon's master. `TestConnectionTestUsesNoMaster` pins this.
+- **Values passed to `-o` are not quoted.** A ControlPath with a space in it is split by
+  ssh, which is why the real-ssh test keeps its sockets outside the spaced directory.
+  The default path has no spaces, so nothing changes in practice.
+
+Verified end to end against a second daemon on port 9990 with every portkeeper path in a
+temp directory. It added a copy of `code` under a new alias, and the connection test
+returned `ok` and the host key fingerprint. Discover listed its listeners, a local-forward
+of :3000 answered on the Mac, Remove was refused with the mapping open, and an edit
+restarted the master with the mapping coming back `alive`. `~/.ssh/config` and
+`~/.ssh/known_hosts` had the same SHA-1 before and after. Not verified: a first connection
+to a host whose key is in neither known_hosts file, which is the case that writes to
+portkeeper's own file; the Pi used for it was unreachable at the time.

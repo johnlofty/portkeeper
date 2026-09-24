@@ -388,14 +388,18 @@ func inUseMsg(alias string, mappings, pinned int) string {
 		}
 		return strconv.Itoa(n) + " " + many
 	}
+	close := " Close them first."
+	if mappings+pinned == 1 {
+		close = " Close it first."
+	}
 	switch {
 	case mappings > 0 && pinned > 0:
 		return alias + " still has " + plural(mappings, "mapping", "mappings") + " and " +
-			plural(pinned, "pinned mapping", "pinned mappings") + ". Close them first."
+			plural(pinned, "pinned mapping", "pinned mappings") + "." + close
 	case pinned > 0:
-		return alias + " still has " + plural(pinned, "pinned mapping", "pinned mappings") + ". Close them first."
+		return alias + " still has " + plural(pinned, "pinned mapping", "pinned mappings") + "." + close
 	default:
-		return alias + " still has " + plural(mappings, "mapping", "mappings") + ". Close them first."
+		return alias + " still has " + plural(mappings, "mapping", "mappings") + "." + close
 	}
 }
 
