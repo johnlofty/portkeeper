@@ -91,12 +91,12 @@ func TestAliasCannotLookLikeAnSSHFlag(t *testing.T) {
 		"$(whoami)",
 		"",
 	} {
-		if err := book.Add(bad); err == nil {
+		if err := book.Add(hostEntry{Alias: bad, HostName: "10.0.0.2"}); err == nil {
 			t.Errorf("accepted dangerous alias %q", bad)
 		}
 	}
 
-	if err := book.Add("box2"); err != nil {
+	if err := book.Add(hostEntry{Alias: "box2", HostName: "10.0.0.2"}); err != nil {
 		t.Fatalf("rejected a reasonable alias: %v", err)
 	}
 	if !book.Known("box2") {
@@ -111,13 +111,16 @@ func TestManualHostsPersist(t *testing.T) {
 	file := filepath.Join(dir, "hosts")
 
 	first := newHostBook(cfg, filepath.Join(dir, "none"), file)
-	if err := first.Add("box2"); err != nil {
+	if err := first.Add(hostEntry{Alias: "box2", HostName: "10.0.0.2", User: "pk", Port: 2222}); err != nil {
 		t.Fatal(err)
 	}
 
 	reloaded := newHostBook(cfg, filepath.Join(dir, "none"), file)
 	if !reloaded.Known("box2") {
 		t.Fatal("manual host did not survive a reload")
+	}
+	if e := reloaded.List()[1]; e.HostName != "10.0.0.2" || e.User != "pk" || e.Port != 2222 || e.Source != srcManual {
+		t.Fatalf("manual host lost its settings in a reload: %+v", e)
 	}
 
 	if err := reloaded.Remove("box2"); err != nil {

@@ -124,6 +124,7 @@ func TestAdminForwardCoversEveryCapability(t *testing.T) {
 func TestEveryDataRouteRefusesCrossSiteAndServesTheConsole(t *testing.T) {
 	h, m, _ := testServer(t)
 	m.cfg.MaxForwards = 20
+	stubFingerprint(t, "")
 
 	// Order matters only where one case's success is the next one's precondition: the
 	// host has to exist before it can be removed.
@@ -132,8 +133,12 @@ func TestEveryDataRouteRefusesCrossSiteAndServesTheConsole(t *testing.T) {
 		want               int
 	}{
 		{"GET", "/api/hosts", "", 200},
-		{"POST", "/api/hosts", `{"alias":"box2"}`, 200},
+		{"POST", "/api/hosts", `{"alias":"box2","hostname":"10.0.0.2"}`, 200},
+		{"PUT", "/api/hosts/box2", `{"hostname":"10.0.0.3","user":"pk"}`, 200},
+		{"POST", "/api/hosts/box2/test", "", 200},
+		{"GET", "/api/identities", "", 200},
 		{"DELETE", "/api/hosts/box2", "", 200},
+		{"PUT", "/api/hosts/code", `{"hostname":"10.0.0.4"}`, 400}, // LG_HOSTS is not the console's
 		{"GET", "/api/hosts/code/listeners", "", 200},
 		{"GET", "/api/status", "", 200},
 		{"GET", "/api/forwards", "", 200},
