@@ -23,7 +23,7 @@ Portkeeper is a Mac app for Apple Silicon, macOS 14 or later. It needs your remo
 as `Host` entries in `~/.ssh/config`, and `ssh <alias>` has to connect without a password
 prompt, from keys or an agent. Portkeeper never edits that file.
 
-1. **Download** `Portkeeper-v0.1.0-macos-arm64.zip` from the
+1. **Download** the latest `Portkeeper-<version>-macos-arm64.zip` from the
    [Releases page](https://github.com/johnlofty/portkeeper/releases). The repository is
    private for now, so the page is only reachable by its collaborators.
 2. **Move `Portkeeper.app` to `/Applications`** and open it from there. Do this before the
