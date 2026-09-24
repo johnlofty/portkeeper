@@ -2,9 +2,6 @@
 
 Port mappings between your Mac and a remote dev box, without hand-rolling `ssh -L`.
 
-Formerly `local-gateway`. The launchd label, the `~/.config/local-gateway` directory, the
-log at `/tmp/local-gateway.log` and the `LG_` environment prefix still carry the old name.
-
 A daemon on the Mac owns one SSH ControlMaster per host and adds or drops forwards on it
 on demand. You drive it from a web console on the Mac, behind a password login. Nothing
 on the remote can reach the daemon: its listener is loopback-only and no port is forwarded
