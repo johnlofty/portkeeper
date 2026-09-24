@@ -2,9 +2,10 @@
 
 Port mappings between your Mac and a remote dev box, without hand-rolling `ssh -L`.
 
-A daemon on the Mac owns one SSH ControlMaster and adds or drops forwards on it on
-demand. You drive it from a web console on the Mac; hooks and scripts drive it from
-the remote with `expose`.
+A daemon on the Mac owns one SSH ControlMaster per host and adds or drops forwards on it
+on demand. You drive it from a web console on the Mac, behind a password login. Nothing
+on the remote can reach the daemon: its listener is loopback-only and no port is forwarded
+to it.
 
 Two directions, named after the ssh flags they become:
 
@@ -13,65 +14,42 @@ Two directions, named after the ssh flags they become:
 | `local-forward`  | `-L` | A dev server on `code` opens in your Mac's browser                    |
 | `remote-forward` | `-R` | A service on your Mac (notifications, an API) is callable from `code` |
 
-`DESIGN.md` covers why it works this way.
+`DESIGN.md` covers why it works this way, and what it used to be.
 
-## Two levels
+## The console
 
-**The console** — <http://127.0.0.1:9996/> on the Mac, behind a password login. Full
-control: create, edit and delete mappings in either direction, plus configuration.
+<http://127.0.0.1:9996/> on the Mac. Log in once per browser session; the cookie lasts
+twelve hours. From there: create, edit and delete mappings in either direction, pin the
+ones you want to survive a restart, see what a host is listening on and forward it in one
+click, and add hosts.
 
-**`expose`** — the public API, callable by anything on the remote box, no
-authentication. It can only create a local-forward, list, and close.
-
-The split is the security model. The control channel is reachable by every process on
-the remote VM, so it is kept safe by offering a deliberately small set of operations
-rather than by a shared secret — a secret copied onto that box would be readable by
-those same processes anyway. Publishing a Mac service to the remote, or popping a
-browser window on your screen, are the operations worth protecting, so they live
-behind the login.
+Every route except the page itself, login and logout requires the session. There is no
+unauthenticated API. The password comes from `LG_ADMIN_PASSWORD`, or from
+`~/.config/local-gateway/admin-password` with mode 0600. Without one the daemon starts but
+can do nothing.
 
 ## Install
 
-On the Mac:
-
 ```sh
 make install          # builds bin/gatewayd, loads the launchd agent
-make deploy-client    # scp bin/expose to code:~/.local/bin/
 ```
 
-The control channel needs one line in `~/.ssh/config` under `Host code`:
-
-```
-RemoteForward 9996 localhost:9996
-```
-
-## From the remote
-
-```sh
-expose 8530                             # forward it, print the Mac URL
-expose 8530 --label mkdp --ttl 3600
-expose --list
-expose --close code:local-forward:8530  # or just: expose --close 8530
-expose --wait 8530                      # hold it; Ctrl-C drops it
-```
-
-The URL is the only thing on stdout, so `url="$(expose 8530)"` works in a script.
-
-`--list` shows everything the daemon holds, including remote-forwards made from the
-console, so the FLOW column spells out which way each mapping points.
+That is the whole install. The daemon opens its own SSH connection to each host in
+`LG_HOSTS` (default `code`) at startup, on a private ControlPath, so it never fights your
+interactive sessions for a socket and never tears one of them down.
 
 ## Checking it works
 
 ```sh
 make status                                  # is the agent loaded
 make logs                                    # tail /tmp/local-gateway.log
-curl -s 127.0.0.1:9996/api/forwards | jq     # on the Mac
-expose --list                                # from the remote, proves the tunnel too
+ssh -o 'ControlPath=~/.ssh/sockets/local-gateway-%r@%h-%p' -O check code
+                                             # is the daemon's master up
 ```
 
-`expose` failing with "cannot reach the local-gateway daemon" means one of two things:
-no SSH session from the Mac is currently up (the `RemoteForward` only exists while one
-is), or the daemon isn't running. It tells you which to check.
+The log says `master code: up` a few seconds after start. If it says `still not ready`
+every thirty seconds, the host is unreachable or the connection is failing; the console's
+rows for that host read **reconnecting** with the attempt count.
 
 ## Hosts
 
@@ -79,19 +57,78 @@ The console picks a host from a list rather than taking a typed name. It merges 
 sources: `LG_HOSTS`, the `Host` entries in `~/.ssh/config`, and hosts added in the console
 (persisted to `~/.config/local-gateway/hosts`).
 
-Discovery does not grant access. Two tiers, because `/api` has no authentication:
+Any host in the list may be forwarded to, because reaching the list already required a
+login. `LG_HOSTS` marks the ones whose connection is opened eagerly at startup; every other
+host is dialled on first use.
 
-| Caller | May forward to |
-| ------ | -------------- |
-| the console (password) | anything in the list |
-| `expose` on a remote box | `LG_HOSTS` only |
+Aliases are validated, not escaped: an alias becomes an argv element handed to ssh, so
+anything ssh might read as an option is rejected outright.
 
-That split is deliberate. Your ssh config probably names your router and a few boxes you
-would not want a compromised dependency on a dev VM to request a tunnel to. The console
-marks any host it can reach that `expose` cannot, so the difference is visible in the picker
-instead of surfacing as a 403.
+## Pinned mappings
 
-`expose` does not guess which host it is on: a box cannot know what this Mac's ssh config
-calls it. It sends nothing, and the daemon fills in the single public host — or says so
-plainly when there are several. `make deploy-client` writes the alias to
-`~/.config/local-gateway/host` on the remote so it is explicit once you have more than one.
+A mapping marked **keep across restarts** in the console is written to
+`~/.config/local-gateway/pinned` (0600, override with `LG_PINNED_FILE`) and re-created on
+startup and on any reconcile tick that finds it missing. It is the one thing about a
+mapping that outlives the daemon.
+
+Pinning clears the TTL, because "keep this" and "drop this in eight hours" cannot both be
+true. Closing a pinned mapping removes the pin as well — otherwise the next tick would put
+it straight back.
+
+A pin to a host that only appears in `~/.ssh/config` brings that host's connection up
+eagerly at startup, rather than on first use like other discovered hosts. You asked for
+the mapping to exist; it cannot exist without the connection.
+
+## What is the remote listening on
+
+The console's **Listening on** section asks a host what it is running — `ss`, or `netstat`
+where `ss` is missing, plus `docker ps` — and offers a Forward button per row that opens
+the add form already filled in, with the process or container name as the label. Ports
+that are already mapped are marked rather than hidden, with a link to the one you have.
+
+This is `GET /admin/hosts/{alias}/listeners`. The call is capped at 15 seconds, so a wedged
+docker daemon on the far side cannot hang the console.
+
+## Forwarding past the remote
+
+A local-forward may target a machine other than the remote's own localhost — the database
+box `code` can reach, say. Set **target host on remote** in the console, or `remote_host`
+on `POST /admin/forward`; leave it empty for localhost, which is what every mapping meant
+before the field existed.
+
+The value goes straight into an ssh forward spec, so it is validated against the same
+character class as a host alias: letters, digits, dot, dash, underscore, no leading dash,
+**no colons**. IPv4 addresses pass. IPv6 literals do not and are not supported — the spec
+is colon-delimited, and bracket syntax inside it is exactly the ambiguity that rule exists
+to avoid.
+
+These mappings get a longer id — `code:local-forward:db:5432` instead of
+`code:local-forward:5432` — so a mapping to the remote itself and one to a third machine
+on the same port stay distinct. Ids of mappings without a target host are unchanged.
+
+## Ranges
+
+`8000-8010` in the console's remote port field creates one independent mapping per port,
+each with its own id, TTL and close button. Up to 32 ports per request, and the overall
+`LG_MAX_FORWARDS` cap still applies. If one port in a range fails, the ones that request
+just created are rolled back; mappings that already existed are left alone. Leave the
+local port blank to mirror, or give a single local port to have the range start there.
+
+Editing does not take ranges. Once made, they are just mappings.
+
+## When the link drops
+
+A mapping on a host whose SSH connection is down reads **reconnecting**, not dead, and the
+console says which attempt the daemon is on and when it will try again. Retries back off
+30s, 1m, 2m, 4m, 8m, then every 10 minutes — and never stop, because a laptop can sleep for
+hours and wake up wanting the same tunnels. Asking for a forward to that host from the
+console retries immediately, regardless of where the schedule had got to.
+
+`GET /admin/status` carries the same per-host detail under `hosts`: whether it is healthy,
+how many attempts have failed, seconds until the next one, and the last error. The
+`LG_HOSTS` list is under `eager_hosts`.
+
+A daemon restart also starts clean: a control socket left behind by a killed master is
+detected and removed before a new one is started, and a new master is given a few seconds
+to settle before any forward is sent to it. Both of those are scars; `DESIGN.md` has the
+stories.

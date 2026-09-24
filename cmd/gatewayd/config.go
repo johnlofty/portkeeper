@@ -11,28 +11,33 @@ import (
 )
 
 type Config struct {
-	// Listen carries everything: the public /api, the authenticated /admin, and the
-	// console. It is reachable from the remote over RemoteForward, which is why
-	// authority is decided per endpoint rather than per port.
+	// Listen carries the console and the /admin routes behind it. It is loopback-only
+	// and nothing off this Mac can reach it; requireLoopback enforces that.
 	Listen string
 
-	// PublicHosts is the narrow allowlist the unauthenticated /api may target, and the
-	// set whose masters are opened eagerly — a public host is one the remote reaches us
-	// through, so its RemoteForward must exist before anything out there calls in.
+	// EagerHosts (LG_HOSTS) is the set whose masters are opened at startup rather than
+	// on first use. It says nothing about authority — every host the book knows is
+	// equally reachable to an authenticated caller — only about when the connection is
+	// made. These are the boxes in daily use, so paying for the connection up front
+	// means the first forward of the day does not wait for one.
 	//
-	// Hosts discovered from ssh_config are NOT added here. Discovery decides what the
-	// console offers; it must not decide what a process on a remote VM may ask for.
-	PublicHosts []string
+	// Hosts discovered from ssh_config are NOT added here: dialling every alias in an
+	// ssh config at startup would be absurd. They are connected on demand instead.
+	EagerHosts []string
 
 	SSHConfigPath string
 	HostsFile     string
+
+	// PinnedFile holds the mappings that are wanted across restarts. Like HostsFile it
+	// is configuration, not a cache of ssh's internals — see the comment on `pin`.
+	PinnedFile string
 
 	MaxForwards int
 	DefaultTTL  time.Duration
 	ControlPath string
 
-	// AdminPassword guards /admin. Empty means admin is disabled and every admin
-	// route fails closed; the public API keeps working.
+	// AdminPassword guards everything. Empty means admin is disabled, every route but
+	// `GET /` fails closed, and the daemon can do nothing at all until one is set.
 	//
 	// Neither source here is the right long-term home: an environment variable is
 	// visible to anything that can read the process environment, and a file is only as
@@ -90,10 +95,12 @@ func loadConfig() (*Config, error) {
 
 	c := &Config{
 		Listen:        env("LG_LISTEN", "127.0.0.1:9996"),
-		PublicHosts:   splitHosts(env("LG_HOSTS", "code")),
+		EagerHosts:    splitHosts(env("LG_HOSTS", "code")),
 		SSHConfigPath: expandHome(env("LG_SSH_CONFIG", "~/.ssh/config"), home),
 		HostsFile: expandHome(env("LG_HOSTS_FILE",
 			filepath.Join(home, ".config", "local-gateway", "hosts")), home),
+		PinnedFile: expandHome(env("LG_PINNED_FILE",
+			filepath.Join(home, ".config", "local-gateway", "pinned")), home),
 		MaxForwards: envInt("LG_MAX_FORWARDS", 20),
 		DefaultTTL:  time.Duration(envInt("LG_DEFAULT_TTL", 28800)) * time.Second,
 		ControlPath: expandHome(env("LG_CONTROL_PATH", "~/.ssh/sockets/local-gateway-%r@%h-%p"), home),
@@ -102,7 +109,7 @@ func loadConfig() (*Config, error) {
 				filepath.Join(home, ".config", "local-gateway", "admin-password")), home)),
 	}
 
-	if len(c.PublicHosts) == 0 {
+	if len(c.EagerHosts) == 0 {
 		return nil, fmt.Errorf("LG_HOSTS is empty: nothing to forward to")
 	}
 	if err := requireLoopback(c.Listen); err != nil {
@@ -111,8 +118,8 @@ func loadConfig() (*Config, error) {
 	return c, nil
 }
 
-// requireLoopback refuses any non-loopback listen address. Anything that can reach
-// this socket can ask for a forward and a browser open, so it must never leave the box.
+// requireLoopback refuses any non-loopback listen address. A session cookie is the only
+// thing guarding this socket, so it must never be offered anywhere but this machine.
 func requireLoopback(addr string) error {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -128,22 +135,12 @@ func requireLoopback(addr string) error {
 	return nil
 }
 
-// allows reports whether the PUBLIC api may target this host. Authenticated callers go
-// through the host book instead, which is wider.
-func (c *Config) allows(host string) bool {
-	for _, h := range c.PublicHosts {
-		if h == host {
-			return true
-		}
-	}
-	return false
-}
-
-// defaultHost is only meaningful when exactly one host is configured; with several,
-// a request must say which one it means.
+// defaultHost fills in the host for a request that did not name one. It is only
+// meaningful when exactly one host is configured; with several, a request must say which
+// one it means.
 func (c *Config) defaultHost() string {
-	if len(c.PublicHosts) == 1 {
-		return c.PublicHosts[0]
+	if len(c.EagerHosts) == 1 {
+		return c.EagerHosts[0]
 	}
 	return ""
 }

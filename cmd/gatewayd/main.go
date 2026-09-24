@@ -34,10 +34,10 @@ func main() {
 		log.Fatalf("listen %s: %v (is another gatewayd already running?)", cfg.Listen, err)
 	}
 	if !cfg.adminEnabled() {
-		log.Print("admin is DISABLED: /admin refuses everything and / serves only the " +
-			"login page; the public /api still works. To enable it, either set " +
-			"LG_ADMIN_PASSWORD, or write the password to " +
-			"~/.config/local-gateway/admin-password and chmod 600 it.")
+		log.Print("admin is DISABLED, which leaves this daemon unable to do anything: " +
+			"every route but / refuses, and / serves only the login page. There is no " +
+			"unauthenticated API any more. Either set LG_ADMIN_PASSWORD, or write the " +
+			"password to ~/.config/local-gateway/admin-password and chmod 600 it.")
 	}
 
 	run := execRunner{}
@@ -45,11 +45,15 @@ func main() {
 
 	m := newManager(cfg, run, nil)
 	m.book = book
+	m.pins = newPinBook(cfg.PinnedFile)
+	if n := len(m.pins.List()); n > 0 {
+		log.Printf("%d pinned mapping(s) from %s", n, cfg.PinnedFile)
+	}
 	m.newMaster = func(host string) masterCtl {
 		return &sshMaster{cfg: cfg, host: host, run: run}
 	}
 	// Backgrounded: bringing up a master can block for seconds per host (longer if one
-	// is unreachable), and the control channel must not be dead while that happens.
+	// is unreachable), and the console must be answering before that finishes.
 	go m.Start()
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -77,7 +81,7 @@ func main() {
 	}()
 
 	log.Printf("listening on %s, hosts %v (admin %s)",
-		cfg.Listen, cfg.PublicHosts, map[bool]string{true: "enabled", false: "disabled"}[cfg.adminEnabled()])
+		cfg.Listen, cfg.EagerHosts, map[bool]string{true: "enabled", false: "disabled"}[cfg.adminEnabled()])
 	if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
 		log.Printf("http: %v", err)
 	}

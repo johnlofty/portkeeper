@@ -2,14 +2,18 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -39,11 +43,21 @@ func (d direction) flag() string {
 // The explicit remote bind address is verified to work against this sshd, which runs
 // the default GatewayPorts=no; that setting confines a remote forward to loopback
 // anyway, so naming 127.0.0.1 agrees with it rather than fighting it.
-func (d direction) spec(local, remote int) string {
+//
+// remoteHost names the TARGET of a local-forward on the far side, and defaults to
+// localhost. It is only ever a value that has passed safeAlias, because it is spliced
+// into a colon-delimited spec: a colon in it would silently re-cut the whole string
+// into different fields, and a leading dash would be read by ssh as an option.
+// A remote-forward ignores it — its target is this Mac, which is always localhost.
+func (d direction) spec(local, remote int, remoteHost string) string {
 	if d == dirRemote {
 		return fmt.Sprintf("127.0.0.1:%d:localhost:%d", remote, local)
 	}
-	return fmt.Sprintf("127.0.0.1:%d:localhost:%d", local, remote)
+	target := remoteHost
+	if target == "" {
+		target = "localhost"
+	}
+	return fmt.Sprintf("127.0.0.1:%d:%s:%d", local, target, remote)
 }
 
 // listenPort is the side that actually binds a socket, and so the only port ssh can
@@ -80,12 +94,15 @@ func (c *Config) argvMaster(host string) []string {
 		"-o", "ControlMaster=yes", "-o", "ControlPersist=no", host)
 }
 
-func (c *Config) argvForward(host string, d direction, local, remote int) []string {
-	return sshArgv(c.ControlPath, "-O", "forward", d.flag(), d.spec(local, remote), host)
+// argvForward and argvCancel must build the SAME spec for the same mapping: ssh matches
+// a cancel against the string it was given, so a remote host that is present on one and
+// absent on the other leaves a forward nothing can take down.
+func (c *Config) argvForward(host string, d direction, local, remote int, remoteHost string) []string {
+	return sshArgv(c.ControlPath, "-O", "forward", d.flag(), d.spec(local, remote, remoteHost), host)
 }
 
-func (c *Config) argvCancel(host string, d direction, local, remote int) []string {
-	return sshArgv(c.ControlPath, "-O", "cancel", d.flag(), d.spec(local, remote), host)
+func (c *Config) argvCancel(host string, d direction, local, remote int, remoteHost string) []string {
+	return sshArgv(c.ControlPath, "-O", "cancel", d.flag(), d.spec(local, remote, remoteHost), host)
 }
 
 // argvListeners asks the remote what it is listening on. This is the only way to check
@@ -96,8 +113,30 @@ func (c *Config) argvListeners(host string) []string {
 	return sshArgv(c.ControlPath, host, "ss", "-ltnH")
 }
 
+// discoverCmd is what a host is asked when the console wants to SHOW what is listening
+// there, as opposed to argvListeners' cheap yes/no liveness probe.
+//
+// It is a fixed string. Nothing from a request is ever interpolated into it — the only
+// user-supplied value in the whole invocation is the host alias, which is a separate
+// argv element and has passed safeAlias. That is the rule that keeps a remote command
+// string safe without any quoting to get right.
+//
+// Every stage is independently optional, because the three boxes this runs against do
+// not agree on what is installed: ss where it exists, netstat where it does not, an
+// unprivileged sudo retry that fills in process names when it is permitted and prints
+// nothing when it is not, and docker last. A missing tool must leave the rest working,
+// which is why each stage swallows its own errors rather than failing the command.
+const discoverCmd = `ss -ltnpH 2>/dev/null || netstat -tlnp 2>/dev/null; ` +
+	`sudo -n ss -ltnpH 2>/dev/null; ` +
+	`printf '\n__LG_DOCKER__\n'; ` +
+	`docker ps --format '{{.Names}}\t{{.Ports}}' 2>/dev/null || true`
+
+func (c *Config) argvDiscover(host string) []string {
+	return sshArgv(c.ControlPath, host, discoverCmd)
+}
+
 // portFailure matches the ports ssh names when a forward cannot be set up, e.g.
-// "remote port forwarding failed for listen port 9996" or "cannot listen to port: 8530".
+// "remote port forwarding failed for listen port 9997" or "cannot listen to port: 8530".
 var portFailure = regexp.MustCompile(`\b(\d{2,5})\b`)
 
 var failureWords = []string{"fail", "cannot", "error", "refused", "in use", "bind", "denied"}
@@ -105,10 +144,12 @@ var failureWords = []string{"fail", "cannot", "error", "refused", "in use", "bin
 // failureNamesPort reports whether ssh blamed this specific port.
 //
 // Every `ssh -O forward` replays ssh_config's RemoteForward lines to the master, and
-// ours are already bound, so a non-zero exit is the normal case and says nothing on its
-// own. But ssh names the offending port in each failure line, and the replay noise only
-// ever names the control ports. So the question "did MY forward fail" has a precise
-// answer: did any failure line mention my listen port.
+// those ports are already bound, so a non-zero exit is the normal case and says nothing
+// on its own. The lines are still there — 9997 and 9998 carry notify-relay and ccimgd,
+// independently of this daemon — so the noise is still real. But ssh names the offending
+// port in each failure line, and the replay noise only ever names those config ports. So
+// the question "did MY forward fail" has a precise answer: did any failure line mention
+// my listen port.
 //
 // The previous rule — tolerate any error if the port answers — is what let a forward
 // resolve to an unrelated process that happened to hold the port.
@@ -182,7 +223,7 @@ func forwardErrTolerable(out string, listenPort int) bool {
 }
 
 // parseListeners pulls the listening ports out of `ss -ltnH` output, whose rows look
-// like: "LISTEN 0 128 127.0.0.1:9996 0.0.0.0:*".
+// like: "LISTEN 0 128 127.0.0.1:3000 0.0.0.0:*".
 func parseListeners(out string) map[int]bool {
 	ports := map[int]bool{}
 	for _, line := range strings.Split(out, "\n") {
@@ -208,10 +249,36 @@ type runner interface {
 	run(argv []string) (string, error)
 }
 
+// boundedRunner is the escape hatch for the one command that can genuinely hang.
+// Everything else here is a local mux round trip that returns in milliseconds; listener
+// discovery runs real programs on the far side, and a wedged docker daemon there must
+// not hold an HTTP handler on this Mac open indefinitely.
+//
+// It is a separate optional interface rather than a wider `runner` so that every test
+// fake keeps working unchanged.
+type boundedRunner interface {
+	runBounded(argv []string, d time.Duration) (string, error)
+}
+
 type execRunner struct{}
 
 func (execRunner) run(argv []string) (string, error) {
 	out, err := exec.Command("ssh", argv...).CombinedOutput()
+	if err != nil {
+		return string(out), fmt.Errorf("ssh %s: %w: %s",
+			strings.Join(argv, " "), err, strings.TrimSpace(string(out)))
+	}
+	return string(out), nil
+}
+
+func (execRunner) runBounded(argv []string, d time.Duration) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), d)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, "ssh", argv...).CombinedOutput()
+	if ctx.Err() != nil {
+		return string(out), fmt.Errorf("ssh %s: gave up after %s", strings.Join(argv, " "), d)
+	}
 	if err != nil {
 		return string(out), fmt.Errorf("ssh %s: %w: %s",
 			strings.Join(argv, " "), err, strings.TrimSpace(string(out)))
@@ -231,8 +298,10 @@ type sshMaster struct {
 	host string
 	run  runner
 
-	mu  sync.Mutex
-	cmd *exec.Cmd
+	mu   sync.Mutex
+	cmd  *exec.Cmd
+	done chan struct{} // closed once cmd has been reaped
+	sock string        // the expanded ControlPath, learned from `ssh -G` on first use
 }
 
 func (m *sshMaster) check() error {
@@ -244,6 +313,8 @@ func (m *sshMaster) start() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	m.clearStaleSocketLocked()
+
 	cmd := exec.Command("ssh", m.cfg.argvMaster(m.host)...)
 	// A writer rather than StderrPipe: Wait closes a pipe as soon as the process
 	// exits, which would race the reader. With a writer, Wait drains it first.
@@ -251,30 +322,134 @@ func (m *sshMaster) start() error {
 	if err := cmd.Start(); err != nil {
 		return err
 	}
-	go cmd.Wait() // reap; liveness is judged by `ssh -O check`, not by this
-	m.cmd = cmd
+	done := make(chan struct{})
+	go func() { // reap; liveness is judged by `ssh -O check`, not by this
+		cmd.Wait()
+		close(done)
+	}()
+	m.cmd, m.done = cmd, done
 	return nil
 }
 
+// stop asks the master to exit and then makes sure nothing of it is left behind: not
+// the process, and not its socket file.
+//
+// The order matters. `-O exit` makes the master unlink its own socket on the way out,
+// but only if it is allowed to get there; a SIGKILL that lands first leaves the file in
+// place, and OpenSSH will never reuse a leftover socket (see clearStaleSocketLocked).
+// So the kill is a fallback after a grace period, not the first move.
 func (m *sshMaster) stop() error {
 	_, err := m.run.run(m.cfg.argvExit(m.host))
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.cmd != nil && m.cmd.Process != nil {
-		m.cmd.Process.Kill()
-		m.cmd = nil
+		select {
+		case <-m.done:
+		case <-time.After(2 * time.Second):
+			m.cmd.Process.Kill()
+			select {
+			case <-m.done:
+			case <-time.After(time.Second):
+			}
+		}
+		m.cmd, m.done = nil, nil
 	}
+	m.clearStaleSocketLocked()
 	return err
 }
 
-// waitReady polls until the master answers, because a freshly started master needs
-// a moment to authenticate and bind its socket.
+// socketPathLocked is the file ssh will actually use for this host's control socket.
+// ControlPath carries %r/%h/%p tokens the daemon cannot expand itself, but `ssh -G`
+// prints the resolved configuration without connecting anywhere, so ask it once.
+func (m *sshMaster) socketPathLocked() string {
+	if m.sock != "" {
+		return m.sock
+	}
+	out, err := m.run.run(sshArgv(m.cfg.ControlPath, "-G", m.host))
+	if err != nil {
+		return ""
+	}
+	m.sock = parseControlPath(out)
+	return m.sock
+}
+
+func parseControlPath(out string) string {
+	for _, line := range strings.Split(out, "\n") {
+		k, v := splitKeyword(strings.TrimSpace(line))
+		if strings.EqualFold(k, "controlpath") {
+			return v
+		}
+	}
+	return ""
+}
+
+// clearStaleSocketLocked removes a control socket that no master is serving.
+//
+// OpenSSH does not do this itself. Started with -M against a path that already exists,
+// it logs "ControlSocket ... already exists, disabling multiplexing" and carries on as a
+// plain session that answers no `-O check`. The daemon then sees a master that never
+// comes up, stops it, starts another, and gets the same result: a loop it cannot leave
+// on its own. Found live on 2026-09-23: a `make install` two days earlier had SIGKILLed
+// the previous daemon's master before it unlinked, and every tick since had hit this.
+//
+// Only a socket that exists AND refuses connections is removed. A live socket belongs
+// to whoever is serving it, and a regular file at that path is somebody else's problem.
+func (m *sshMaster) clearStaleSocketLocked() {
+	path := m.socketPathLocked()
+	if path == "" || !socketStale(path) {
+		return
+	}
+	if err := os.Remove(path); err != nil {
+		logf("master %s: stale control socket %s could not be removed: %v", m.host, path, err)
+		return
+	}
+	logf("master %s: removed stale control socket %s", m.host, path)
+}
+
+// socketStale reports whether path is a Unix socket nothing is listening on.
+func socketStale(path string) bool {
+	fi, err := os.Lstat(path)
+	if err != nil || fi.Mode()&os.ModeSocket == 0 {
+		return false
+	}
+	c, err := net.DialTimeout("unix", path, 500*time.Millisecond)
+	if err == nil {
+		c.Close()
+		return false
+	}
+	return errors.Is(err, syscall.ECONNREFUSED)
+}
+
+// masterSettle is how long a freshly answering master is left alone before the daemon
+// sends it any `-O forward`. See waitReady. Tests set it to zero.
+var masterSettle = 3 * time.Second
+
+// waitReady polls until the master answers, because a freshly started master needs a
+// moment to authenticate and bind its socket -- and then waits a little longer.
+//
+// The extra wait is not politeness. At startup the master sends one tcpip-forward
+// request per RemoteForward line in ssh_config and registers a reply handler for each
+// that points INTO its options.remote_forwards array. A `-O forward -R` arriving over
+// the mux socket before those replies are back appends to that array, which may move
+// it, and the pending handlers then read freed memory. Seen live on 2026-09-23 as
+// "ssh_confirm_remote_forward: parse packet: incomplete message", a fatal that killed
+// the master twice in a row, each time within a second of the daemon re-asserting the
+// control channel; the third start survived on timing alone. The mux socket appears
+// before those replies arrive, so "answers -O check" is not "ready for -O forward -R",
+// and nothing in the mux protocol says when it is. So wait longer than a round trip to
+// the remote could plausibly take.
+//
+// Retiring the control channel removed the one thing that reliably sent an `-O forward -R`
+// within milliseconds of a master coming up, but it did not remove the hazard: a
+// remote-forward pin asserted by Start(), or one made from the console against a host
+// dialled on demand, arrives on the same path. The wait stays.
 func waitReady(m masterCtl, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	var err error
 	for time.Now().Before(deadline) {
 		if err = m.check(); err == nil {
+			time.Sleep(masterSettle)
 			return nil
 		}
 		time.Sleep(200 * time.Millisecond)
@@ -283,9 +458,10 @@ func waitReady(m masterCtl, timeout time.Duration) error {
 }
 
 // masterLog forwards the master's stderr, minus the one warning we expect and cannot
-// avoid: ssh_config's RemoteForward lines are shared with the user's interactive
-// master, so whichever connection lands second cannot bind those remote ports. It is
-// harmless, and it would otherwise reappear in the log on every reconnect.
+// avoid: ssh_config still carries `RemoteForward 9997` and `9998` for notify-relay and
+// ccimgd, and those lines are shared with the user's interactive master, so whichever
+// connection lands second cannot bind those remote ports. It is harmless — nothing here
+// depends on them — and it would otherwise reappear in the log on every reconnect.
 type masterLog struct {
 	host string
 	buf  []byte

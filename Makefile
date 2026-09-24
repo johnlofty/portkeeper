@@ -6,18 +6,12 @@
 # not a build step.
 
 BINARY  := bin/gatewayd
-CLIENT  := bin/expose
 PLIST   := io.github.johnlofty.portkeeper.plist
 LABEL   := io.github.johnlofty.portkeeper
 AGENTS  := $(HOME)/Library/LaunchAgents
 REPO    := $(shell pwd)
 
-# The host the client is deployed to, and where it lands on that host.
-HOST       := code
-CLIENT_DST := ~/.local/bin/expose
-
-.PHONY: all build test vet fmt check run install uninstall status logs \
-        deploy-client clean
+.PHONY: all build test vet fmt check run install uninstall status logs clean
 
 all: build
 
@@ -33,14 +27,9 @@ vet:
 fmt:
 	gofmt -l -w ./cmd
 
-# The client ships as a script, so its "compile" is a syntax check. /bin/sh on
-# the remote is dash, so check with dash when it is available rather than
-# letting a bashism through on a bash-is-sh machine.
+# The plist is the one file here no compiler ever reads, so a typo in it only
+# shows up as launchd silently refusing to load the agent.
 check:
-	@sh -n $(CLIENT) && echo "ok: $(CLIENT) parses under sh"
-	@command -v dash >/dev/null 2>&1 \
-		&& dash -n $(CLIENT) && echo "ok: $(CLIENT) parses under dash" \
-		|| echo "note: dash not installed, skipped the stricter check"
 	@plutil -lint $(PLIST)
 
 run: build
@@ -64,21 +53,5 @@ status:
 logs:
 	@tail -f /tmp/local-gateway.log
 
-# Standalone repo for now, so this is a plain scp. Once local-gateway folds
-# into the dotfiles repo, the client rides along with the existing clone on
-# $(HOST) and install.sh symlinks it into ~/.local/bin -- at which point this
-# target becomes `ssh $(HOST) 'cd ~/Project/Github/dotfiles && git pull'`.
-deploy-client: check
-	scp $(CLIENT) $(HOST):$(CLIENT_DST)
-	ssh $(HOST) 'chmod +x $(CLIENT_DST)'
-	@# The alias is written rather than inferred. A box cannot work out what this Mac's
-	@# ssh config calls it -- `hostname -s` on $(HOST) does not match the alias -- and
-	@# guessing it would silently forward a port on the wrong machine once there is
-	@# more than one host. Without this file the daemon still resolves the single
-	@# public host; with two, the client must be explicit.
-	@ssh $(HOST) 'umask 077 && mkdir -p ~/.config/local-gateway && printf "%s\n" "$(HOST)" > ~/.config/local-gateway/host'
-	@echo "deployed $(CLIENT) to $(HOST):$(CLIENT_DST), host alias set to $(HOST)"
-
-# Removes only the built binary: bin/ also holds the hand-written client.
 clean:
 	rm -f $(BINARY)

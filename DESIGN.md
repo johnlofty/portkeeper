@@ -46,6 +46,7 @@ a `http://localhost:<port>` URL that means nothing on the Mac until a tunnel exi
 | [lemonade](https://github.com/lemonade-command/lemonade)              | Mature client-side daemon accepting `open <url>` / copy / paste from a remote over a reverse-forwarded TCP port                                                                                                 | Only opens the URL; assumes the tunnel already exists                                                                                                              |
 | [PortProxy](https://pypi.org/project/portproxy/0.4.0/)                | "Forwards and manages ports dynamically upon request, for machines in your SSH config"                                                                                                                          | Closest in spirit; obscure, page wouldn't load for evaluation                                                                                                      |
 | [pkarsy/sshportfw](https://github.com/pkarsy/sshportfw)               | ControlMaster-based forwarding helper                                                                                                                                                                           | Static/manual, not request-driven                                                                                                                                  |
+| [ruiyangke/porthop](https://github.com/ruiyangke/porthop)             | Tauri/russh macOS app. A "tunnel" is a **named, persisted `-L` profile** you start and stop, with an explicit connection state machine (connecting/connected/retrying) surfaced in the UI, plus remote listener discovery | **Borrowed**: persisted mappings (our pins), the discovery-with-one-click-forward UI, and reporting reconnect state rather than a binary up/down. **Not borrowed**: in-process SSH (russh) and one TCP connection per tunnel — we keep OpenSSH and one multiplexed master. Still not request-driven from the remote |
 
 **The gap:** nobody does push-triggered forwarding. ssh-forward discovers, lemonade opens,
 neither lets the remote say _"expose this port and open it."_ This project is
@@ -417,6 +418,11 @@ this replaces with something dynamic.
 
 ## The control channel stays
 
+> **Superseded 2026-09-24.** It went after all. Nothing on the remote ever called `expose`, and the console's
+> discovery table and pins cover both of the cases this section argued for. See
+> "Retiring the control channel".
+
+
 Phase 1 considered deleting `RemoteForward 9996` to close the remote-facing attack surface.
 **Rejected.** Trusted remote tooling needs to request mappings dynamically, and the Codex
 case above is exactly that. The channel is **restricted rather than removed**: it is an
@@ -450,6 +456,11 @@ Dialing remains the liveness check for `local-forward` during reconcile. For
 often than the local ones and never holds a lock across it.
 
 ## Authorization by capability, not by port
+
+> **Superseded 2026-09-24.** There is one authority level now: every route except `GET /`, login and logout
+> requires the admin session, and nothing on the remote can reach the daemon at all.
+> The invariants below still hold; the public tier they were shaped around is gone.
+
 
 Revised 2026-09-16, replacing an earlier two-port design.
 
@@ -588,6 +599,10 @@ is configuration and belongs in `~/.config/local-gateway/hosts`.
 
 ## The control channel must be asserted, not assumed (2026-09-18)
 
+> **Superseded 2026-09-24.** The re-assert this section introduced is gone with the channel it asserted. The
+> lesson stands, and it is the one that later found the stale-socket wedge.
+
+
 Found by `expose` failing with connection-refused while the Mac looked entirely healthy:
 the daemon was running, its master was up, and its listener was bound — but the remote had
 **no listener on 9996 at all**, so nothing out there could reach us.
@@ -617,3 +632,286 @@ it and `expose` worked again.
 The general lesson, which applies well beyond this line of code: **a health check that only
 looks at your own side of a tunnel is not a health check.** Everything local was green while
 the thing the feature exists for was broken.
+
+## Pinned mappings, discovery, backoff (2026-09-23)
+
+Four things the daemon could not say, each of which turned out to be the same kind of
+omission: it knew something and had nowhere to put it.
+
+### A pin records intent; the table records what ssh holds
+
+`State — in memory only` argues that persisting forwards means persisting a claim about
+another process's internals. That argument still stands, and a pin does not contradict
+it, because a pin is not a forward. It is a sentence in the imperative mood: *this
+mapping should exist*. The live table stays exactly what it was — a mirror of what the
+master currently holds, empty at startup, consistent by construction. Reconcile's new
+last step is to compare the two and fix the difference.
+
+The distinction is the same one that already justified `~/.config/local-gateway/hosts`:
+a host someone typed is configuration, a forward is runtime. Pins live one file over, at
+`~/.config/local-gateway/pinned`, 0600 in a 0700 directory, re-validated on load —
+because its contents become ssh argv, and "we wrote it ourselves last time" is not a
+provenance check.
+
+A pin carries **no TTL**. "Keep this across restarts" and "drop this in eight hours" are
+contradictory instructions, so pinning clears the lease rather than racing it; a pinned
+mapping that expired would be re-created within thirty seconds by the very loop that is
+supposed to honour it, which is the daemon arguing with itself in public.
+
+For the same reason, **closing a pinned mapping removes the pin**. Anything else means
+clicking × and watching the row come back, which reads as the daemon ignoring you.
+
+A pin to a host that only exists in `ssh_config` **forces that master up eagerly**, which
+is a deliberate exception to "discovered hosts are dialled lazily". The lazy rule exists
+because holding a connection to every alias in a config would be absurd; someone who
+pinned a mapping to that box has said the mapping should exist whether or not anyone asks
+for it today, and that is a different statement.
+
+### `/api` cannot touch pins, and cannot name a third host
+
+> **Superseded 2026-09-24.** There is no `/api`. Pins, `remote_host`, discovery and ranges are all admin
+> operations because everything is; the refusals described here no longer exist as code.
+
+
+The public tier's rule has not changed: it may create, list and close a local-forward to
+`LG_HOSTS`. Everything added here fails that test for a specific reason rather than out
+of caution.
+
+- **Pins are configuration.** A process on the remote VM may ask for a tunnel; it may not
+  edit what this Mac does at startup. It may *see* the pin flag in a listing — knowing a
+  mapping is pinned is not authority over it — and it gets a 403 both for `"pinned": true`
+  on create and for closing a pinned mapping.
+- **`remote_host` is a reach.** A local-forward with a target other than localhost turns
+  this daemon into a way onto the remote's *network*: `db`, the metadata endpoint, the
+  neighbour's admin panel. That the remote can reach those is not a reason the caller may
+  hand them out. 403.
+- **Discovery is reconnaissance.** `GET /admin/hosts/{alias}/listeners` enumerates a
+  machine's open ports and the processes behind them, which is admin-only for exactly the
+  reason `GET /admin/hosts` already is.
+
+Ranges are public, because a range is just N of the operation `/api` already permits.
+
+### `remote_host` is validated, never escaped, and IPv6 is out of scope
+
+The value is spliced into `-L 127.0.0.1:L:HOST:R`. There is nothing to escape it *with*:
+the spec is colon-delimited and positional, so a colon in the host silently re-cuts the
+whole string into different fields — `db:80:other` is not a host with a funny name, it is
+a different target and a different port. A leading dash has the older problem: argv rules
+out a shell, but it does not stop ssh reading its own flags.
+
+So the same `safeAlias` class an ssh alias must pass applies here. IPv4 dotted quads pass
+it. **IPv6 literals cannot, and are deliberately unsupported** — supporting them means
+bracket syntax inside a colon-delimited field, which is precisely the ambiguity this rule
+exists to remove. Nothing on the far side of this tunnel has needed one.
+
+The id grows a field only when the target is set: `host:direction:port` when it is empty,
+`host:direction:remote_host:port` when it is not. The short form is what `bin/expose`
+builds by hand, so every deployed copy keeps naming the mappings it always did; the long
+form is unambiguous because the value cannot contain a colon, and `find()` compares whole
+ids rather than splitting them anyway.
+
+### Backoff, and why it never gives up
+
+`reconcile` used to spawn `ssh` every thirty seconds forever against a box that was simply
+switched off, and log a line each time. The schedule is now 30s, 1m, 2m, 4m, 8m, capped at
+10 minutes, reset by any success. A tick inside the window does *nothing*: no process, no
+log line. An explicit admin `Open` ignores the schedule entirely — backoff is there to
+stop a background loop being rude, and someone who has just asked for a forward has said
+something the loop did not know.
+
+It has **no terminal state**. A laptop sleeps for hours and wakes with the same mappings
+still wanted; "gave up" would mean the operator has to notice and intervene, which is the
+opposite of what a daemon is for. The cap exists to bound noise, not to declare defeat.
+
+That state is also worth *reporting*, which is where the third row state comes from. A
+forward on a host whose master is down is **`reconnecting`**, not `dead`. Calling it dead
+sends someone off to re-create a mapping that is coming back on its own, and the daemon
+knew better the whole time. `List()` therefore reads host health under the same lock as
+the table, so a row's state cannot disagree with the connection it depends on, and
+`/admin/status` grows a `hosts` map (attempts, next retry, last error) that the console
+turns into "reconnecting, attempt 3, next try in 2m".
+
+The flat allowlist that used to live at `status.hosts` moved to `public_hosts`. What an
+operator wants from that route is whether the link is up, which a list of names cannot
+answer.
+
+### Discovery is a separate command from the liveness probe
+
+`argvListeners` (`ss -ltnH`) stays exactly as it is: it answers one cheap yes/no question
+for remote-forward reaping, several times a minute. Discovery is a different job and gets
+its own fixed command — `ss -ltnpH || netstat -tlnp`, an unprivileged `sudo -n` retry for
+process names, a marker line, then `docker ps`. Every stage swallows its own errors,
+because the boxes this runs against do not agree on what is installed and a missing tool
+must not cost us the stages that worked.
+
+Nothing from a request is interpolated into that string. The only user-supplied value in
+the whole invocation is the host alias, which is a separate argv element and has passed
+`safeAlias` — the same rule that has kept every other remote command safe here without a
+single quoting decision.
+
+It is the one call with a **timeout** (15s, `exec.CommandContext`). Everything else the
+daemon runs is a local mux round trip that returns in milliseconds; this one runs real
+programs on the far side, and a wedged docker daemon there must not hold an HTTP handler
+on this Mac open indefinitely.
+
+An entry that is **already forwarded is marked, not hidden**. "Why is 3000 missing from
+this list" is a worse question to leave someone with than one row saying it is patched.
+
+### Ranges expand server-side into independent mappings
+
+`8000-8010` is a convenience at the request layer only. It becomes eleven ordinary
+records with eleven ids, because anything else would mean inventing a second kind of
+thing that can be closed, edited and reaped — and the moment one port of a range dies,
+the abstraction is a lie anyway.
+
+They install sequentially (each mutates the same master, and the port allocator reads a
+table the previous one just wrote), after a preflight that validates every member, and a
+failure part way through **rolls back only what that call created**. A request that
+overlapped an existing mapping reuses it, and tearing that one down over an unrelated
+failure would break something that was working before the call arrived. The cap is 32 per
+request; `MaxForwards` still applies on top.
+
+The response keeps its old flat shape when no range was asked for, and only then:
+`bin/expose` reads `.url` off the top level, and changing that for every caller in order
+to serve a feature they did not use would be a poor trade. A range answers with
+`{"forwards": [...]}`, which `expose` reads with jq and refuses to guess at without it.
+
+## A stale control socket wedges the daemon (2026-09-23)
+
+Found live. `expose` and the console both failed with "ssh connection to code did not come
+up ... Control socket connect(...): Connection refused", while the Mac was online, the
+remote answered on port 22, and the user's own interactive master was fine. The log showed
+the same three lines every 30 seconds:
+
+```
+master code: gone, restarting
+ssh[code]: ControlSocket .../local-gateway-dev@203.0.113.7-22 already exists, disabling multiplexing
+master code: still not ready: ... Connection refused
+```
+
+It had been doing so for **two days**. Line 1 of the log is the daemon starting at 12:56:57
+on the 21st, right after `make install`; line 2 is the warning above. The socket file dated
+from 12:33 that day and belonged to the previous daemon instance, the one `make install`
+had just replaced. Its `Shutdown()` ran `stop()`, which sent `-O exit` and then SIGKILLed
+at once; a kill that lands before the master reaches its own cleanup leaves the file
+behind. The new daemon then could not recover, and no daemon restart could either, because
+`Start()` runs the same `stop()` then `start()` and hits the same wall. Nothing surfaced it
+until someone tried to use it.
+
+The assumption that broke: that OpenSSH would reuse or replace a leftover socket. It does
+neither. Started with `-M` against a path that already exists, it disables multiplexing and
+runs as a plain session, which answers no `-O check`. So the daemon saw a master that never
+came up, killed it, started another, and got the same result.
+
+Two changes in `sshMaster`:
+
+- **`stop()` gives the master two seconds to exit on its own** after `-O exit` before it
+  kills anything. A master that exits cleanly unlinks its socket. The kill is the fallback,
+  not the first move.
+- **Both `start()` and `stop()` remove a stale socket**: one that exists, is a socket, and
+  refuses connections. A live socket belongs to whoever is serving it and is left alone, and
+  a regular file at that path is not ours to touch. The path is the one ssh will actually
+  use, learned from `ssh -G`, which prints the resolved configuration with `%r@%h-%p`
+  expanded and never connects anywhere.
+
+The immediate recovery on the live machine was `rm` of the one stale file, after confirming
+that connecting to it was refused and that no process held it. The running daemon bound a
+fresh master on its next tick.
+
+### The second thing the recovery uncovered
+
+With the socket gone, the master came up, and then died within a second. Twice:
+
+```
+15:18:22 master code: gone, restarting
+ssh[code]: ssh_confirm_remote_forward: parse packet: incomplete message
+15:18:52 master code: gone, restarting
+ssh[code]: ssh_confirm_remote_forward: parse packet: incomplete message
+15:19:22 master code: gone, restarting
+```
+
+The third start lived. That message is a `fatal` inside ssh's handler for the reply to a
+`tcpip-forward` request, on a code path that is only reachable when the request asked for
+port 0. Nothing here asks for port 0. What fits the evidence is this: at startup the master
+sends one request per `RemoteForward` line in ssh_config (9996, 9997, 9998 here) and
+registers a reply handler for each holding a pointer *into* its `options.remote_forwards`
+array. The mux socket appears before those replies come back from Azure. The daemon's
+`waitReady` saw the socket within 200ms and immediately sent `-O forward -R` for the control
+channel, which appends to that same array; when it moves, the three pending handlers read
+freed memory, and a garbage port of 0 sends one of them down the fatal path. The third
+attempt survived because the replies happened to land first.
+
+So "answers `-O check`" is not "ready for `-O forward -R`", and the mux protocol offers no
+way to ask. **`waitReady` now waits a further three seconds after the first successful
+check** before returning, which is well beyond any plausible round trip. Every path that
+brings a master up goes through it, so the pause covers the control-channel re-assert, the
+replay, and an admin's first forward to a lazily dialled host.
+
+The alternative considered and rejected for now: `ClearAllForwardings=yes` on the master's
+own command line, so it sends no startup requests at all and the race cannot exist. It is
+clean, but decision 1 leans on the daemon's master carrying the 9997 and 9998 lines so
+notify-relay and ccimgd stay reachable with no interactive session open. With pins those two
+could become explicit remote-forward pins and the config lines could go; that is a change to
+make deliberately, not as a side effect of a bug fix.
+
+The general lesson joins the one under host discovery: **a restart is only a recovery when
+it starts from a clean slate.** The daemon restarted its master every thirty seconds for two
+days and not one of those restarts changed anything, because the thing that was wrong was
+outside the process being restarted. And a health check that reports green on the first
+possible instant is measuring "exists", not "ready".
+
+## Retiring the control channel (2026-09-24)
+
+`expose`, the public `/api`, and the `RemoteForward 9996` control channel are gone.
+
+The case for keeping them was made twice in this document and both times it rested on the
+same sentence: trusted remote tooling needs to request mappings dynamically. Checked on
+2026-09-23 against the actual remote: `expose` was installed and nothing called it. No
+editor hook, no script, four entries in a shell history. The markdown-preview hook that was
+the original payoff case was never wired, and once `open` became admin-only in phase 2 it
+could not have delivered the payoff anyway.
+
+Meanwhile the console grew the two things the channel was really for. The **Listening on**
+table with its Forward button is `expose <port>` with the process name filled in. Pins are
+the standing mappings a hook would otherwise have had to re-request. Between them there
+was nothing left for a remote caller to ask.
+
+What the channel cost, in hindsight, is the more persuasive half of the argument:
+
+- It was the daemon's **only unauthenticated surface**, and the whole "authorization by
+  capability" model existed to make that surface safe.
+- It needed a `RemoteForward` line in ssh_config that the user's own interactive session
+  fought over, which is why the daemon re-asserted it every tick.
+- That re-assert, fired within 200ms of a master answering, is what tripped the OpenSSH
+  use-after-realloc that killed the master twice on 2026-09-23.
+- It meant a client script to ship, a deploy step, a host file on the remote, and a
+  two-tier host model whose difference the console had to explain in its picker.
+
+### What the daemon is now
+
+One authority level. `GET /` serves the console shell, which carries no data. `POST
+/admin/login` starts a session, `POST /admin/logout` ends the one it is handed. Every other
+route returns 401 without the session cookie, and there is a test that walks the whole
+route table to prove it. The listener is still loopback-only, and with no RemoteForward
+pointing at it, **a process on the remote VM cannot reach the daemon at all**. That is a
+stronger position than the capability model ever was, and it needed no design to get there.
+
+`LG_HOSTS` keeps exactly one of its two old meanings: the hosts whose masters are opened
+eagerly at startup. The "reachable by `expose`" meaning is gone, and so is the marker in
+the picker. Any host the console knows may be forwarded to, because getting that far
+already required a login.
+
+### What is given up
+
+Scripted push from the remote. No process on `code` can make a port appear on the Mac
+without a human at the console. If that is ever wanted again it comes back as a decision,
+with its own threat model, rather than as the default this project started with.
+
+### Operator steps outside the repo
+
+- `~/.local/bin/expose` and `~/.config/local-gateway/host` on the remote: delete.
+- `RemoteForward 9996 localhost:9996` and its two comment lines under `Host code` in
+  ssh_config: remove. The 9997 and 9998 lines stay; they belong to notify-relay and ccimgd.
+- The masterLog filter for "remote port forwarding failed" stays too, for the same reason:
+  those two lines still replay on every `-O forward` and still collide with the
+  interactive session.

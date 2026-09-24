@@ -10,7 +10,6 @@ import (
 	"io"
 	"net/http"
 	"os/exec"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -30,20 +29,27 @@ const (
 var (
 	errAdminDisabled = errors.New("admin is disabled: gatewayd started with no password, " +
 		"from either LG_ADMIN_PASSWORD or ~/.config/local-gateway/admin-password")
-	errNotAdmin     = errors.New("admin session required")
-	errRemoteNotPub = errors.New("a remote-forward is an admin capability: publishing a Mac service to the remote cannot be requested anonymously")
-	errOpenNotPub   = errors.New("open is an admin capability: opening a browser cannot be requested anonymously")
+	errNotAdmin = errors.New("admin session required")
+
+	errOpenWithRange = errors.New("open cannot be combined with a port range: it would put one browser window on the screen per port")
+	errRangeNeedsLow = errors.New("local_port_end needs local_port: a range has to start somewhere")
 )
 
 type forwardReq struct {
 	Direction  string `json:"direction"`
+	RemoteHost string `json:"remote_host"`
 	RemotePort int    `json:"remote_port"`
 	LocalPort  int    `json:"local_port"`
-	Host       string `json:"host"`
-	Label      string `json:"label"`
-	Open       bool   `json:"open"`
-	TTL        *int   `json:"ttl"`
-	Requester  string `json:"requester"`
+	// *_end turn one request into a range. Absent means "just the one port", which is
+	// what every caller that predates the field sends.
+	RemotePortEnd int    `json:"remote_port_end"`
+	LocalPortEnd  int    `json:"local_port_end"`
+	Host          string `json:"host"`
+	Label         string `json:"label"`
+	Open          bool   `json:"open"`
+	Pinned        bool   `json:"pinned"`
+	TTL           *int   `json:"ttl"`
+	Requester     string `json:"requester"`
 }
 
 type editBody struct {
@@ -51,6 +57,8 @@ type editBody struct {
 	TTL        *int    `json:"ttl"`
 	LocalPort  *int    `json:"local_port"`
 	RemotePort *int    `json:"remote_port"`
+	RemoteHost *string `json:"remote_host"`
+	Pinned     *bool   `json:"pinned"`
 }
 
 // sessions holds the live admin logins. Ids are random and meaningless: the map is the
@@ -110,37 +118,32 @@ type server struct {
 	sess *sessions
 }
 
-// newServer wires one listener with two levels of authority.
+// newServer wires one listener with a single level of authority.
 //
-// There is deliberately no port-based or address-based trust here. Requests arriving
-// through the SSH RemoteForward are indistinguishable from ones typed into the Mac's
-// own browser — both are loopback — so an unauthenticated request is treated as PUBLIC
-// no matter where it appears to come from. RemoteAddr is never consulted for authority.
+// Everything this daemon can do is an admin capability, and the only two anonymous
+// routes are `GET /` — the console shell, which carries no data — and `POST /admin/login`,
+// which is how a caller stops being anonymous. There is no public API and nothing on the
+// remote can reach this listener at all any more; see "Retiring the control channel" in
+// DESIGN.md.
+//
+// There is deliberately no port-based or address-based trust here either. Loopback origin
+// is not evidence of anything, so RemoteAddr is never consulted for authority: a session
+// cookie is the only thing that grants any.
 func newServer(m *manager, cfg *Config) http.Handler {
 	s := &server{m: m, cfg: cfg, sess: newSessions()}
 	mux := http.NewServeMux()
 
-	// Public. Assume any process on the remote VM can reach these.
-	mux.HandleFunc("GET /api/forwards", s.list)
-	mux.HandleFunc("POST /api/forward", s.publicOpen)
-	mux.HandleFunc("DELETE /api/forward/{ref}", s.publicClose)
-
-	// Pre-/api client still deployed on the remote; same public authority.
-	mux.HandleFunc("POST /forward", s.publicOpen)
-	mux.HandleFunc("DELETE /forward/{ref}", s.publicClose)
-	mux.HandleFunc("GET /forwards", s.list)
-
-	// Authenticated. Full authority, both directions.
 	mux.HandleFunc("POST /admin/login", s.login)
 	mux.HandleFunc("POST /admin/logout", s.logout)
 	mux.HandleFunc("GET /admin/hosts", s.requireAdmin(s.listHosts))
 	mux.HandleFunc("POST /admin/hosts", s.requireAdmin(s.addHost))
 	mux.HandleFunc("DELETE /admin/hosts/{alias}", s.requireAdmin(s.removeHost))
+	mux.HandleFunc("GET /admin/hosts/{alias}/listeners", s.requireAdmin(s.hostListeners))
 	mux.HandleFunc("GET /admin/status", s.requireAdmin(s.status))
 	mux.HandleFunc("GET /admin/forwards", s.requireAdmin(s.list))
-	mux.HandleFunc("POST /admin/forward", s.requireAdmin(s.adminOpen))
+	mux.HandleFunc("POST /admin/forward", s.requireAdmin(s.open))
 	mux.HandleFunc("PATCH /admin/forward/{ref}", s.requireAdmin(s.edit))
-	mux.HandleFunc("DELETE /admin/forward/{ref}", s.requireAdmin(s.adminClose))
+	mux.HandleFunc("DELETE /admin/forward/{ref}", s.requireAdmin(s.close))
 
 	mux.HandleFunc("GET /{$}", s.root)
 	return mux
@@ -239,17 +242,60 @@ func (s *server) logout(w http.ResponseWriter, r *http.Request) {
 // part of the response shape at all, so it cannot leak through this route.
 func (s *server) status(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"listen":        s.cfg.Listen,
-		"hosts":         s.cfg.PublicHosts,
+		"listen": s.cfg.Listen,
+		// `hosts` is now the per-host connection state, keyed by alias; the flat list of
+		// configured names it used to be moved to `eager_hosts`. What an operator wants
+		// from this route is "is the link to that box up, and when does it try again",
+		// which a list of names cannot answer.
+		"hosts":         s.m.HostHealth(),
+		"eager_hosts":   s.cfg.EagerHosts,
 		"max_forwards":  s.cfg.MaxForwards,
 		"default_ttl":   int(s.cfg.DefaultTTL.Seconds()),
 		"admin_enabled": true,
 		"forwards":      len(s.m.List()),
+		"pinned":        s.pinCount(),
 	})
 }
 
-// listHosts is admin-only on purpose: it describes the machines this Mac can reach, which
-// is not something an anonymous caller on a remote VM has any business enumerating.
+func (s *server) pinCount() int {
+	if s.m.pins == nil {
+		return 0
+	}
+	return len(s.m.pins.List())
+}
+
+// hostListeners shows what a host is listening on. Like everything else here it needs a
+// session, and it is the route the console's Discover button calls.
+func (s *server) hostListeners(w http.ResponseWriter, r *http.Request) {
+	alias := strings.TrimSpace(r.PathValue("alias"))
+	if !safeAlias.MatchString(alias) {
+		writeErr(w, http.StatusBadRequest, errBadAlias.Error())
+		return
+	}
+	if s.m.book == nil || !s.m.book.Known(alias) {
+		writeErr(w, http.StatusBadRequest, errUnknownHost.Error())
+		return
+	}
+	// A host discovered in ssh_config has no master until something needs one. Dialling
+	// it here is the lazy-connection rule working as intended: an admin asked.
+	if err := s.m.ensureUp(alias); err != nil {
+		writeErr(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	entries, err := s.m.discoverListeners(alias)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	if entries == nil {
+		entries = []listenEntry{}
+	}
+	s.m.markForwarded(alias, entries)
+	writeJSON(w, http.StatusOK, map[string]any{"host": alias, "listeners": entries})
+}
+
+// listHosts describes the machines this Mac can reach, which is what the console's host
+// picker is built from.
 func (s *server) listHosts(w http.ResponseWriter, r *http.Request) {
 	if s.m.book == nil {
 		writeJSON(w, http.StatusOK, []hostEntry{})
@@ -298,10 +344,7 @@ func (s *server) list(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.m.List())
 }
 
-func (s *server) publicOpen(w http.ResponseWriter, r *http.Request) { s.open(w, r, false) }
-func (s *server) adminOpen(w http.ResponseWriter, r *http.Request)  { s.open(w, r, true) }
-
-func (s *server) open(w http.ResponseWriter, r *http.Request, admin bool) {
+func (s *server) open(w http.ResponseWriter, r *http.Request) {
 	body, err := readAndRestore(r)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "body too large")
@@ -318,19 +361,6 @@ func (s *server) open(w http.ResponseWriter, r *http.Request, admin bool) {
 		dir = dirLocal // what every caller meant before the field existed
 	}
 
-	// The two capabilities an anonymous caller must not have: publishing a Mac service
-	// to the remote, and making something appear on the user's screen.
-	if !admin {
-		if dir == dirRemote {
-			writeErr(w, http.StatusForbidden, errRemoteNotPub.Error())
-			return
-		}
-		if req.Open {
-			writeErr(w, http.StatusForbidden, errOpenNotPub.Error())
-			return
-		}
-	}
-
 	host, ok := s.resolveHost(w, req.Host)
 	if !ok {
 		return
@@ -345,68 +375,142 @@ func (s *server) open(w http.ResponseWriter, r *http.Request, admin bool) {
 		ttl = time.Duration(*req.TTL) * time.Second // an explicit 0 means no expiry
 	}
 
-	view, reused, err := s.m.Open(openReq{
-		host:       host,
-		direction:  dir,
-		remotePort: req.RemotePort,
-		localPort:  req.LocalPort,
-		label:      req.Label,
-		ttl:        ttl,
-		requester:  req.Requester,
-		open:       req.Open,
-		admin:      admin,
-	})
-	switch {
-	case errors.Is(err, errPortRange), errors.Is(err, errUnknownHost),
-		errors.Is(err, errBadDirection), errors.Is(err, errLocalNeeded),
-		errors.Is(err, errOpenNotLocal):
+	reqs, ranged, err := expandForward(req, dir, host, ttl)
+	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
-		return
-	case errors.Is(err, errAtCapacity):
-		writeErr(w, http.StatusTooManyRequests, err.Error())
-		return
-	case err != nil:
-		writeErr(w, http.StatusBadGateway, err.Error())
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	// A request with no range keeps the single-object response: the console reads `.url`
+	// off the top level, and a range envelope for a caller that asked for one port would
+	// be a shape change in service of a feature it never used.
+	if !ranged {
+		view, reused, err := s.m.Open(reqs[0])
+		if err != nil {
+			writeErr(w, forwardErrStatus(err), err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, forwardResult(view, reused))
+		return
+	}
+
+	views, err := s.m.OpenRange(reqs)
+	if err != nil {
+		writeErr(w, forwardErrStatus(err), err.Error())
+		return
+	}
+	out := make([]map[string]any, 0, len(views))
+	for _, v := range views {
+		out = append(out, forwardResult(v, false))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"forwards": out})
+}
+
+func forwardResult(view forwardView, reused bool) map[string]any {
+	return map[string]any{
 		"id":          view.ID,
 		"direction":   view.Direction,
 		"local_port":  view.LocalPort,
 		"remote_port": view.RemotePort,
+		"remote_host": view.RemoteHost,
+		"pinned":      view.Pinned,
 		"url":         view.URL, // always server-constructed; never echoed from the request
 		"reused":      reused,
-	})
+	}
 }
 
-func (s *server) publicClose(w http.ResponseWriter, r *http.Request) { s.close(w, r, false) }
-func (s *server) adminClose(w http.ResponseWriter, r *http.Request)  { s.close(w, r, true) }
+// forwardErrStatus separates "you asked for something impossible" from "the ssh side
+// would not do it", which are 400 and 502 respectively and read very differently to
+// whoever is looking at the failure.
+func forwardErrStatus(err error) int {
+	var caller callerError
+	switch {
+	case err == nil:
+		return http.StatusOK
+	case errors.Is(err, errPortRange), errors.Is(err, errUnknownHost),
+		errors.Is(err, errBadDirection), errors.Is(err, errLocalNeeded),
+		errors.Is(err, errOpenNotLocal), errors.Is(err, errRemoteHostNotLocal),
+		errors.Is(err, errBadRemoteHost), errors.Is(err, errRangeTooBig),
+		errors.Is(err, errRangeOrder), errors.Is(err, errRangeLength),
+		errors.As(err, &caller):
+		return http.StatusBadRequest
+	case errors.Is(err, errAtCapacity):
+		return http.StatusTooManyRequests
+	default:
+		return http.StatusBadGateway
+	}
+}
 
-// close takes either a forward id or, for the client deployed before ids existed, a
-// bare remote port with ?host=.
-func (s *server) close(w http.ResponseWriter, r *http.Request, admin bool) {
-	ref := r.PathValue("ref")
+// expandForward turns one request into the mappings it asks for, and reports whether a
+// range was requested at all.
+//
+// The expansion happens HERE rather than in the manager because a range is a property of
+// the request, not of a mapping: each port ends up as its own independent record with its
+// own id, which is what makes closing or editing one of them mean anything.
+func expandForward(req forwardReq, dir direction, host string, ttl time.Duration) ([]openReq, bool, error) {
+	rStart, rEnd := req.RemotePort, req.RemotePortEnd
+	lStart, lEnd := req.LocalPort, req.LocalPortEnd
+	rangedR, rangedL := rEnd != 0, lEnd != 0
 
-	var target *forward
-	if port, convErr := strconv.Atoi(ref); convErr == nil {
-		host, ok := s.resolveHost(w, r.URL.Query().Get("host"))
-		if !ok {
-			return
+	n := 1
+	if rangedR {
+		if rEnd < rStart {
+			return nil, false, errRangeOrder
 		}
-		target, _ = s.m.find(localForwardID(host, port))
-	} else {
-		target, _ = s.m.find(ref)
+		n = rEnd - rStart + 1
 	}
-	if target == nil {
+	if rangedL {
+		if lStart == 0 {
+			return nil, false, errRangeNeedsLow
+		}
+		if lEnd < lStart {
+			return nil, false, errRangeOrder
+		}
+		if nl := lEnd - lStart + 1; rangedR && nl != n {
+			return nil, false, errRangeLength
+		} else {
+			n = nl
+		}
+	}
+	ranged := rangedR || rangedL
+	if n > maxRangePorts {
+		return nil, false, errRangeTooBig
+	}
+	if ranged && req.Open {
+		return nil, false, errOpenWithRange
+	}
+
+	reqs := make([]openReq, 0, n)
+	for i := 0; i < n; i++ {
+		o := openReq{
+			host:       host,
+			direction:  dir,
+			remoteHost: strings.TrimSpace(req.RemoteHost),
+			label:      req.Label,
+			ttl:        ttl,
+			requester:  req.Requester,
+			open:       req.Open,
+			pinned:     req.Pinned,
+		}
+		// A zero start stays zero: it means "unset", and the manager's own defaulting
+		// (mirror the other side, or allocate) is what should decide, not this loop.
+		if rStart != 0 {
+			o.remotePort = rStart + i
+		}
+		if lStart != 0 {
+			o.localPort = lStart + i
+		}
+		reqs = append(reqs, o)
+	}
+	return reqs, ranged, nil
+}
+
+// close drops the mapping named by a forward id. Closing a pinned mapping removes its
+// pin too, which CloseID handles: "close" can only sensibly mean that.
+func (s *server) close(w http.ResponseWriter, r *http.Request) {
+	target, ok := s.m.find(r.PathValue("ref"))
+	if !ok {
 		writeErr(w, http.StatusNotFound, errNotFound.Error())
-		return
-	}
-	// Closing a remote-forward is the counterpart of creating one, so it needs the
-	// same authority; otherwise anything on the VM could tear down the Mac services
-	// published to it.
-	if !admin && target.direction != dirLocal {
-		writeErr(w, http.StatusForbidden, errRemoteNotPub.Error())
 		return
 	}
 
@@ -434,6 +538,7 @@ func (s *server) edit(w http.ResponseWriter, r *http.Request) {
 
 	var e editReq
 	e.label, e.localPort, e.remotePort = b.Label, b.LocalPort, b.RemotePort
+	e.remoteHost, e.pinned = b.RemoteHost, b.Pinned
 	if b.TTL != nil {
 		if *b.TTL < 0 {
 			writeErr(w, http.StatusBadRequest, "ttl must not be negative")
@@ -447,10 +552,8 @@ func (s *server) edit(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case errors.Is(err, errNotFound):
 		writeErr(w, http.StatusNotFound, err.Error())
-	case errors.Is(err, errPortRange):
-		writeErr(w, http.StatusBadRequest, err.Error())
 	case err != nil:
-		writeErr(w, http.StatusBadGateway, err.Error())
+		writeErr(w, forwardErrStatus(err), err.Error())
 	default:
 		writeJSON(w, http.StatusOK, view)
 	}

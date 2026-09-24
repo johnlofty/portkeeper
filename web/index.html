@@ -473,27 +473,29 @@
   }
   select:focus-visible { outline: 2px solid var(--focus); outline-offset: -1px; border-color: var(--focus); }
 
-  /* A host only the console can use is worth marking: `expose` on the remote will be
-     refused for it, and finding that out from a 403 later is a poor way to learn. */
+  /* The picked host's real hostname, which the option itself is too narrow to carry. */
   .hostnote {
     margin: 9px 0 0;
     font-size: 11.5px;
     color: var(--dim);
   }
-  .hostnote b { font-weight: 500; color: var(--warn); }
 
   .addhost { display: flex; align-items: flex-end; gap: 8px; margin-top: 11px; }
   .addhost input { width: 14ch; }
-  .f-port  input { width: 8ch; }
-  .f-label input { width: 12ch; }
-  .f-ttl   input { width: 8ch; }
+  .f-port   input { width: 9ch; }
+  .f-label  input { width: 12ch; }
+  .f-ttl    input { width: 8ch; }
+  .f-target input { width: 11ch; }
 
-  /* field order mirrors the bay: the machine the service lives on comes first */
+  /* field order mirrors the bay: the machine the service lives on comes first, and the
+     target host sits immediately after the remote port because the two together name
+     one endpoint on the far side. */
   .f-host   { order: 1; }
   .f-remote { order: 2; }
-  .f-local  { order: 3; }
-  .f-label  { order: 4; }
-  .f-ttl    { order: 5; }
+  .f-target { order: 3; }
+  .f-local  { order: 4; }
+  .f-label  { order: 5; }
+  .f-ttl    { order: 6; }
   .form[data-dir="remote-forward"] .f-local  { order: 2; }
   .form[data-dir="remote-forward"] .f-remote { order: 3; }
 
@@ -586,6 +588,93 @@
   .login button.primary { align-self: flex-start; }
   .login .err { margin-top: 0; }
 
+  /* ---- pinned, reconnecting ------------------------------------------ */
+
+  /* A pin is a property of the mapping, not of its health, so it gets its own colour
+     rather than competing with the direction signal on the cable itself. */
+  .pinmark { flex: none; display: inline-flex; color: var(--label); }
+  .pinmark svg { display: block; }
+  .expiry[data-pinned="1"] { color: var(--label); }
+
+  /* Reconnecting is not dead. The row keeps its endpoints readable — nothing has been
+     lost, the link underneath it is being rebuilt — and takes the warning hue that the
+     expiry countdown already uses for "this needs your attention soon". */
+  .cable[data-state="reconnecting"]        { --sig: var(--warn); }
+  .cable[data-state="reconnecting"] .port  { color: var(--dim); }
+  .cable[data-state="reconnecting"] .gauge { background: var(--warn); opacity: .5; }
+
+  .note {
+    flex: none;
+    font: 11px/1.4 ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    color: var(--warn);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* ---- discovery ----------------------------------------------------- */
+
+  .probe { margin-top: 20px; }
+
+  .probe-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .probe h2 {
+    margin: 0;
+    font: 500 11.5px/1.4 -apple-system, system-ui, sans-serif;
+    color: var(--dim);
+  }
+  .probe h2 .m { color: var(--ink); }
+  .probe-tools { display: flex; align-items: center; gap: 7px; }
+  .probe-tools select { padding: 3px 6px; font-size: 11.5px; }
+
+  .probe-note { margin: 9px 0 0; font-size: 11.5px; color: var(--dim); max-width: 50ch; }
+  .probe-note.bad { color: var(--dead); }
+
+  table.lst {
+    width: 100%;
+    margin-top: 9px;
+    border-collapse: collapse;
+    font: 11.5px/1.5 ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+  table.lst th {
+    text-align: left;
+    padding: 0 9px 5px 0;
+    font: 10.5px/1.4 -apple-system, system-ui, sans-serif;
+    color: var(--faint);
+    font-weight: 400;
+  }
+  table.lst td {
+    padding: 5px 9px 5px 0;
+    border-top: 1px solid var(--edge);
+    vertical-align: baseline;
+  }
+  table.lst td:last-child, table.lst th:last-child { padding-right: 0; text-align: right; }
+  table.lst .addr { color: var(--dim); }
+  table.lst .what { color: var(--ink); overflow: hidden; text-overflow: ellipsis; }
+  table.lst .ctr  { color: var(--label); }
+  table.lst tr[data-forwarded="1"] td { color: var(--faint); }
+
+  .fwdbtn {
+    padding: 2px 9px;
+    border: 1px solid var(--edge);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--dim);
+    font: 11px/1.5 -apple-system, system-ui, sans-serif;
+    cursor: pointer;
+  }
+  .fwdbtn:hover { color: var(--ink); border-color: var(--rail); }
+  .fwdbtn:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+  .already { font: 11px/1.5 -apple-system, system-ui, sans-serif; color: var(--faint); }
+  .already a { color: var(--local); text-decoration: none; }
+  .already a:hover { text-decoration: underline; }
+
   .hidden { display: none; }
 
   @media (max-width: 460px) {
@@ -641,7 +730,7 @@
 
       <div id="empty" class="bay-note hidden">
         <p>Nothing patched.</p>
-        <p>Patch a port below, or run <code>expose 3000</code> on the remote host.</p>
+        <p>Patch a port below, or press <b>Discover</b> to see what a host is listening on.</p>
       </div>
 
       <div id="down" class="bay-note down hidden">
@@ -676,11 +765,15 @@
           </label>
           <label class="f f-port f-remote">
             <span>remote port</span>
-            <input type="text" name="remote_port" inputmode="numeric" autocomplete="off" placeholder="8530">
+            <input type="text" name="remote_port" autocomplete="off" placeholder="8530">
+          </label>
+          <label class="f f-target">
+            <span>target host <em>on remote</em></span>
+            <input type="text" name="remote_host" autocomplete="off" spellcheck="false" placeholder="localhost">
           </label>
           <label class="f f-port f-local">
             <span>local port</span>
-            <input type="text" name="local_port" inputmode="numeric" autocomplete="off" placeholder="same">
+            <input type="text" name="local_port" autocomplete="off" placeholder="same">
           </label>
           <label class="f f-label">
             <span>label <em>optional</em></span>
@@ -708,6 +801,11 @@
           <span>open in browser</span>
         </label>
 
+        <label class="check" id="pin-wrap">
+          <input type="checkbox" name="pinned">
+          <span>keep across restarts</span>
+        </label>
+
         <div class="actions">
           <button type="submit" class="primary">Patch it</button>
           <button type="button" class="ghost" id="add-cancel">Cancel</button>
@@ -716,6 +814,25 @@
         <p class="err hidden" id="add-err" role="alert"></p>
       </form>
     </div>
+
+    <!-- Discovery is a separate surface from the bay on purpose: the bay is what this
+         daemon holds, and this is what the other machine happens to be running. Merging
+         them would blur the one distinction the whole design rests on. -->
+    <section class="probe" id="probe">
+      <div class="probe-head">
+        <h2>Listening on <select id="probe-host" aria-label="Host to inspect"></select></h2>
+        <div class="probe-tools">
+          <button type="button" class="linkbtn" id="probe-run">Discover</button>
+        </div>
+      </div>
+      <p class="probe-note hidden" id="probe-note" role="status" aria-live="polite"></p>
+      <table class="lst hidden" id="probe-table">
+        <thead>
+          <tr><th>port</th><th>address</th><th>process</th><th></th></tr>
+        </thead>
+        <tbody id="probe-rows"></tbody>
+      </table>
+    </section>
   </div>
 </main>
 
@@ -756,9 +873,23 @@
   var addHost   = document.getElementById("addhost");
   var addHostIn = document.getElementById("addhost-name");
 
+  var pinBox    = addForm.elements["pinned"];
+  var ttlBox    = addForm.elements["ttl"];
+  var targetWrap = addForm.querySelector(".f-target");
+
+  var probeHost  = document.getElementById("probe-host");
+  var probeRun   = document.getElementById("probe-run");
+  var probeNote  = document.getElementById("probe-note");
+  var probeTable = document.getElementById("probe-table");
+  var probeRows  = document.getElementById("probe-rows");
+
   var ADD_HOST = "__add_host__";
   var hosts = [];
   var lastHost = "";
+
+  // Per-host connection state, fetched only when a row says it is reconnecting. The
+  // common case stays one request per poll.
+  var hostHealth = {};
 
   var rowsByKey = new Map();
   var timer = null, flashTimer = null;
@@ -794,6 +925,23 @@
     return svg;
   }
 
+  // Drawn for the same reason the pencil is: the pushpin glyphs are emoji on this
+  // machine, and an emoji in a row of monospace machine truth reads as a sticker.
+  function pinIcon() {
+    var NS = "http://www.w3.org/2000/svg";
+    var svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("viewBox", "0 0 16 16");
+    svg.setAttribute("width", "10");
+    svg.setAttribute("height", "10");
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("focusable", "false");
+    var p = document.createElementNS(NS, "path");
+    p.setAttribute("d", "M9.4 1.2 14.8 6.6l-1.1 1.1-1.2-.3-2.3 2.3.2 1.9-1.1 1.1L6 9.4l-4 4.6 4.6-4L3.3 6.7l1.1-1.1 1.9.2 2.3-2.3-.3-1.2 1.1-1.1Z");
+    p.setAttribute("fill", "currentColor");
+    svg.appendChild(p);
+    return svg;
+  }
+
   function dirOf(r) {
     return (r && r.direction === REMOTE_FWD) ? REMOTE_FWD : LOCAL_FWD;
   }
@@ -802,11 +950,18 @@
     return (r && r.host != null) ? String(r.host) : "remote";
   }
 
-  // The daemon sends `id`; compute the documented shape if an older build omits it.
+  function targetOf(r) {
+    return (r && typeof r.remote_host === "string") ? r.remote_host : "";
+  }
+
+  // The daemon sends `id`; compute the documented shape if an older build omits it. The
+  // target host is part of the id only when it is set, so a mapping to the remote itself
+  // keeps the short three-part form.
   function keyOf(r) {
     if (r && typeof r.id === "string" && r.id) return r.id;
     var rp = (r && r.remote_port != null) ? String(r.remote_port) : "?";
-    return hostOf(r) + ":" + dirOf(r) + ":" + rp;
+    var tgt = targetOf(r);
+    return hostOf(r) + ":" + dirOf(r) + (tgt ? ":" + tgt : "") + ":" + rp;
   }
 
   // Colons are legal in a path segment and the daemon splits the id on them, so
@@ -833,6 +988,27 @@
     if (!/^\d+$/.test(v)) return null;
     var n = parseInt(v, 10);
     return (n >= 1024 && n <= 65535) ? n : null;
+  }
+
+  // "8530" or "8000-8010". Returns {start, end} with end === start for a single port,
+  // or null if it is not a port at all. The daemon caps the width; this only has to
+  // recognise the shape.
+  function portRange(v) {
+    var parts = String(v).split("-");
+    if (parts.length > 2) return null;
+    var start = portValue(parts[0]);
+    if (start == null) return null;
+    if (parts.length === 1) return { start: start, end: start, ranged: false };
+    var end = portValue(parts[1]);
+    if (end == null || end < start) return null;
+    return { start: start, end: end, ranged: true };
+  }
+
+  // Same rule as the daemon's, and for the same reason: the value is spliced into a
+  // colon-delimited ssh forward spec, so a colon in it would mean something else
+  // entirely. Checked here too so the mistake is caught before a round trip.
+  function safeTarget(v) {
+    return /^[A-Za-z0-9_][A-Za-z0-9_.\-]*$/.test(v);
   }
 
   // Never trust an address that arrived from a remote host: only a loopback http
@@ -898,6 +1074,9 @@
     loginEl.classList.add("hidden");
     appEl.classList.remove("hidden");
     clearErr(loginErr);
+    // The discovery picker needs the host list whether or not the add form is ever
+    // opened, so it is loaded once here rather than on first patch.
+    loadHosts();
   }
 
   loginForm.addEventListener("submit", function (ev) {
@@ -974,10 +1153,12 @@
     if (dir === LOCAL_FWD) {
       dirHint.textContent =
         "Reach a service running on the remote host from this Mac. " +
-        "Leave the local port blank to mirror the remote port when it is free.";
+        "Leave the local port blank to mirror the remote port when it is free. " +
+        "A remote port may be a range, like 8000-8010.";
       addForm.elements["local_port"].placeholder = "same";
       openWrap.classList.remove("off");
       openBox.disabled = false;
+      targetWrap.classList.remove("hidden");
     } else {
       dirHint.textContent =
         "Let the remote host reach a service running on this Mac. Both ports are required.";
@@ -986,14 +1167,28 @@
       openWrap.classList.add("off");
       openBox.checked = false;
       openBox.disabled = true;
+      // The target of a remote-forward is this Mac, which is always localhost. Showing
+      // the field would suggest it could be something else.
+      targetWrap.classList.add("hidden");
+      addForm.elements["remote_host"].value = "";
     }
+    syncPin();
+  }
+
+  // A pin and a lease are contradictory instructions, and the daemon resolves that by
+  // dropping the lease. The form says so rather than letting a typed TTL vanish.
+  function syncPin() {
+    var pinned = pinBox.checked;
+    ttlBox.disabled = pinned;
+    if (pinned) ttlBox.value = "";
+    ttlBox.placeholder = pinned ? "none" : "8h";
   }
 
   /* ---- hosts -------------------------------------------------------- */
 
-  // Hosts come from three places — LG_HOSTS, ~/.ssh/config, and ones typed here — but
-  // only the first is reachable by `expose` on the remote. The picker shows all of them
-  // and says so, rather than letting that difference surface as a 403 later.
+  // Hosts come from three places — LG_HOSTS, ~/.ssh/config, and ones typed here — and
+  // any of them can be forwarded to. LG_HOSTS comes first in the list because those are
+  // the boxes in daily use, not because the others are second class.
   function paintHosts(selected) {
     var want = selected || hostSel.value || lastHost;
     hostSel.textContent = "";
@@ -1016,6 +1211,23 @@
     if (want && hosts.some(function (h) { return h.alias === want; })) hostSel.value = want;
     else if (hosts.length) hostSel.value = hosts[0].alias;
     syncHostNote();
+    paintProbeHosts();
+  }
+
+  // The discovery picker is deliberately its own control rather than following the add
+  // form's: looking at what a box is running is a thing you do BEFORE deciding to patch
+  // anything, so it has to work with the add form closed.
+  function paintProbeHosts() {
+    var want = probeHost.value || lastHost;
+    probeHost.textContent = "";
+    hosts.forEach(function (h) {
+      var o = document.createElement("option");
+      o.value = h.alias;
+      o.textContent = h.alias;
+      probeHost.appendChild(o);
+    });
+    if (want && hosts.some(function (h) { return h.alias === want; })) probeHost.value = want;
+    probeRun.disabled = hosts.length === 0;
   }
 
   function syncHostNote() {
@@ -1027,12 +1239,6 @@
 
     hostNote.textContent = "";
     if (h.hostname) hostNote.appendChild(el("span", "m", h.hostname));
-    if (!h.public) {
-      if (h.hostname) hostNote.appendChild(document.createTextNode(". "));
-      hostNote.appendChild(document.createTextNode("Console only: "));
-      hostNote.appendChild(el("b", null, "expose"));
-      hostNote.appendChild(document.createTextNode(" on the remote cannot request this host."));
-    }
     hostNote.classList.toggle("hidden", !hostNote.textContent);
   }
 
@@ -1081,8 +1287,8 @@
     });
   });
 
-  function openAdd() {
-    loadHosts();
+  function openAdd(selectHost) {
+    loadHosts(selectHost);
     addForm.classList.remove("hidden");
     addToggle.setAttribute("aria-expanded", "true");
     var first = currentDir() === REMOTE_FWD
@@ -1106,6 +1312,7 @@
   Array.prototype.forEach.call(addForm.elements["direction"], function (radio) {
     radio.addEventListener("change", syncDir);
   });
+  pinBox.addEventListener("change", syncPin);
 
   addForm.addEventListener("submit", function (ev) {
     ev.preventDefault();
@@ -1122,11 +1329,12 @@
       return;
     }
 
-    var remotePort = portValue(rawRemote);
-    if (remotePort == null) {
-      showErr(addErr, "Remote port must be a whole number between 1024 and 65535.");
+    var remote = portRange(rawRemote);
+    if (remote == null) {
+      showErr(addErr, "Remote port must be a whole number between 1024 and 65535, or a range like 8000-8010.");
       return;
     }
+    var remotePort = remote.start;
 
     var body = {
       direction: dir,
@@ -1134,40 +1342,63 @@
       remote_port: remotePort,
       label: addForm.elements["label"].value.trim(),
       open: !openBox.disabled && openBox.checked,
+      pinned: pinBox.checked,
       requester: "console"
     };
+    if (remote.ranged) body.remote_port_end = remote.end;
 
-    if (rawLocal) {
-      var localPort = portValue(rawLocal);
-      if (localPort == null) {
-        showErr(addErr, "Local port must be a whole number between 1024 and 65535.");
+    var rawTarget = addForm.elements["remote_host"].value.trim();
+    if (rawTarget && dir === LOCAL_FWD) {
+      if (!safeTarget(rawTarget)) {
+        showErr(addErr, "Target host may contain only letters, digits, dot, dash and underscore — no colons, so no IPv6 literals.");
         return;
       }
-      body.local_port = localPort;
+      body.remote_host = rawTarget;
+    }
+
+    if (rawLocal) {
+      var local = portRange(rawLocal);
+      if (local == null) {
+        showErr(addErr, "Local port must be a whole number between 1024 and 65535, or a range.");
+        return;
+      }
+      if (local.ranged && remote.ranged && (local.end - local.start) !== (remote.end - remote.start)) {
+        showErr(addErr, "The local and remote ranges cover different numbers of ports.");
+        return;
+      }
+      body.local_port = local.start;
+      if (local.ranged) body.local_port_end = local.end;
     } else if (dir === REMOTE_FWD) {
       showErr(addErr, "A remote-forward needs the local port of the service to publish.");
       return;
     }
 
-    if (rawTtl) {
+    if (rawTtl && !pinBox.checked) {
       if (!/^\d+$/.test(rawTtl)) { showErr(addErr, "TTL must be a whole number of seconds."); return; }
       body.ttl = parseInt(rawTtl, 10);
     }
 
     api("POST", API + "/forward", body).then(function (res) {
       res = res || {};
-      var rdir = res.direction === REMOTE_FWD ? REMOTE_FWD : dir;
-      var rlocal = num(res.local_port);
-      var rremote = num(res.remote_port);
-      if (rremote == null) rremote = remotePort;
 
-      var left  = el("span", "m", endpointText(rdir, "src", host, rremote, rlocal));
-      var right = el("span", "m", endpointText(rdir, "dst", host, rremote, rlocal));
+      // A range answers with an envelope; a single port keeps the shape it always had.
+      if (Array.isArray(res.forwards)) {
+        flash("added", ["Patched ", el("span", "m", String(res.forwards.length)),
+          " mappings on ", el("span", "m", host), "."]);
+      } else {
+        var rdir = res.direction === REMOTE_FWD ? REMOTE_FWD : dir;
+        var rlocal = num(res.local_port);
+        var rremote = num(res.remote_port);
+        if (rremote == null) rremote = remotePort;
 
-      flash(res.reused ? "reused" : "added",
-        res.reused
-          ? ["Already patched — reusing ", left, " to ", right, "."]
-          : ["Patched ", left, " to ", right, "."]);
+        var left  = el("span", "m", endpointText(rdir, "src", host, rremote, rlocal, res.remote_host));
+        var right = el("span", "m", endpointText(rdir, "dst", host, rremote, rlocal, res.remote_host));
+
+        flash(res.reused ? "reused" : "added",
+          res.reused
+            ? ["Already patched — reusing ", left, " to ", right, "."]
+            : ["Patched ", left, " to ", right, "."]);
+      }
 
       addForm.reset();
       syncDir();
@@ -1182,8 +1413,9 @@
 
   // Which machine sits on which side, given a direction. Used for flash copy,
   // where there are no rails to carry the machine identity.
-  function endpointText(dir, side, host, remotePort, localPort) {
-    var remoteTx = host + ":" + (remotePort != null ? remotePort : "?");
+  function endpointText(dir, side, host, remotePort, localPort, target) {
+    var remoteTx = host + ":" + (target ? target + ":" : "") +
+      (remotePort != null ? remotePort : "?");
     var localTx = "127.0.0.1:" + (localPort != null ? localPort : "?");
     if (dir === REMOTE_FWD) return side === "src" ? localTx : remoteTx;
     return side === "src" ? remoteTx : localTx;
@@ -1217,13 +1449,16 @@
 
     var meta = el("div", "meta");
     var who = el("div", "who");
+    var pinmark = el("span", "pinmark hidden");
+    pinmark.appendChild(pinIcon());
     var dir = el("span", "dir");
     var tag = el("span", "tag");
-    who.append(dir, tag);
+    who.append(pinmark, dir, tag);
     var times = el("div", "times");
+    var note = el("span", "note");
     var age = el("span", "age");
     var expiry = el("span", "expiry");
-    times.append(age, expiry);
+    times.append(note, age, expiry);
     var tail = el("div", "tail");
     tail.append(times, btns);
     meta.append(who, tail);
@@ -1233,7 +1468,7 @@
     var refs = {
       li: li, line: line, gauge: gauge, portL: portL, portR: portR, head: head,
       edit: edit, pull: pull, dir: dir, tag: tag, age: age, expiry: expiry,
-      editForm: null
+      pinmark: pinmark, note: note, editForm: null
     };
 
     pull.addEventListener("click", function () { removeForward(refs); });
@@ -1251,20 +1486,27 @@
     refs.data = r;
 
     var dead = r.state === "dead";
+    var waiting = r.state === "reconnecting";
     var dir = dirOf(r);
-    refs.li.dataset.state = dead ? "dead" : "alive";
+    refs.li.dataset.state = dead ? "dead" : (waiting ? "reconnecting" : "alive");
     refs.li.dataset.dir = dir;
 
     var host = hostOf(r);
+    var target = targetOf(r);
     var rport = num(r.remote_port);
     var lport = num(r.local_port);
 
-    var remoteTx = (showHost ? host + ":" : "") + (rport != null ? rport : "?");
+    // A target host always drags the remote host in with it: "db:5432" alone would not
+    // say which box db is reachable from, and that is the whole point of the mapping.
+    var remoteTx = ((showHost || target) ? host + ":" : "") +
+      (target ? target + ":" : "") + (rport != null ? rport : "?");
     var localTx = lport != null ? String(lport) : "?";
 
     refs.portL.textContent = remoteTx;
     refs.portR.textContent = localTx;
-    refs.portL.title = host + ":" + (rport != null ? rport : "?") +
+    refs.portL.title = host + ":" + (target ? target + ":" : "") +
+      (rport != null ? rport : "?") +
+      (target ? "  — reached through " + host : "") +
       (r.requester ? "  — added by " + r.requester : "");
 
     var href = safeUrl(r);
@@ -1286,34 +1528,66 @@
 
     refs.tag.textContent = r.label ? String(r.label) : "";
 
+    var pinned = r.pinned === true;
+    refs.pinmark.classList.toggle("hidden", !pinned);
+    refs.pinmark.title = pinned
+      ? "Pinned: this mapping is re-created after a daemon restart"
+      : "";
+
+    // A reconnecting row explains itself, because "why is this yellow" has a real
+    // answer the daemon already knows: which attempt it is on, and when the next one is.
+    if (waiting) {
+      var h = hostHealth[host] || {};
+      var txt = "reconnecting";
+      if (num(h.attempts)) txt += ", attempt " + h.attempts;
+      if (num(h.next_retry_in)) txt += ", next try in " + duration(h.next_retry_in);
+      refs.note.textContent = txt;
+      refs.note.title = h.last_error ? String(h.last_error) : "";
+    } else {
+      refs.note.textContent = "";
+      refs.note.title = "";
+    }
+
     var age = num(r.age);
     refs.age.textContent = age != null ? duration(age) + " old" : "";
     refs.age.title = age != null ? "Patched " + duration(age) + " ago" : "";
 
     var ttl = num(r.ttl), left = num(r.expires_in);
     var frac = 1;
-    if (dead) {
+    if (pinned) {
+      // Where the lease would be. A pin is the answer to "when does this go away",
+      // and the answer is that it does not.
+      refs.expiry.textContent = "pinned";
+      refs.expiry.title = "Kept across restarts; no expiry";
+      refs.expiry.dataset.pinned = "1";
+      refs.expiry.removeAttribute("data-soon");
+      frac = dead || waiting ? 0 : 1;
+    } else if (dead) {
       // A dead mapping has no lease left to count down; showing one contradicts
       // the struck-through endpoints right above it.
       refs.expiry.textContent = "";
       refs.expiry.title = "";
       refs.expiry.removeAttribute("data-soon");
+      refs.expiry.removeAttribute("data-pinned");
       frac = 0;
     } else if (ttl === 0) {
       refs.expiry.textContent = "—";
       refs.expiry.title = "No expiry";
       refs.expiry.removeAttribute("data-soon");
+      refs.expiry.removeAttribute("data-pinned");
     } else if (ttl != null && ttl > 0 && left != null) {
       refs.expiry.textContent = duration(left) + " left";
       refs.expiry.title = "Expires in " + duration(left);
       // A dead mapping is already gone; counting it down would contradict that.
       if (left < 900 && !dead) refs.expiry.dataset.soon = "1";
       else refs.expiry.removeAttribute("data-soon");
+      refs.expiry.removeAttribute("data-pinned");
       frac = Math.max(0, Math.min(1, left / ttl));
     } else {
       refs.expiry.textContent = "";
       refs.expiry.title = "";
       refs.expiry.removeAttribute("data-soon");
+      refs.expiry.removeAttribute("data-pinned");
     }
 
     // The gauge is anchored at the origin rail and spans toward the destination.
@@ -1355,6 +1629,21 @@
     var fRemote = field("f-port", "remote port", num(r.remote_port));
     fields.append(fLabel.wrap, fTtl.wrap, fLocal.wrap, fRemote.wrap);
 
+    // Editing a range is not offered: the members are independent mappings with their
+    // own ids, and a "range" no longer exists once they are made.
+    var fTarget = null;
+    if (dirOf(r) === LOCAL_FWD) {
+      fTarget = field("f-target", "target host", targetOf(r));
+      fTarget.input.placeholder = "localhost";
+      fields.appendChild(fTarget.wrap);
+    }
+
+    var pinWrap = el("label", "check");
+    var pinIn = document.createElement("input");
+    pinIn.type = "checkbox";
+    pinIn.checked = r.pinned === true;
+    pinWrap.append(pinIn, el("span", null, "keep across restarts"));
+
     var actions = el("div", "actions");
     var save = el("button", "primary", "Save changes");
     save.type = "submit";
@@ -1365,7 +1654,7 @@
     var err = el("p", "err hidden");
     err.setAttribute("role", "alert");
 
-    form.append(fields, actions, err);
+    form.append(fields, pinWrap, actions, err);
     refs.li.appendChild(form);
     refs.editForm = form;
     refs.edit.setAttribute("aria-expanded", "true");
@@ -1404,6 +1693,17 @@
         if (rp !== num(cur.remote_port)) patch.remote_port = rp;
       }
 
+      if (fTarget) {
+        var rawTarget = fTarget.input.value.trim();
+        if (rawTarget && !safeTarget(rawTarget)) {
+          showErr(err, "Target host may contain only letters, digits, dot, dash and underscore.");
+          return;
+        }
+        if (rawTarget !== targetOf(cur)) patch.remote_host = rawTarget;
+      }
+
+      if (pinIn.checked !== (cur.pinned === true)) patch.pinned = pinIn.checked;
+
       if (!Object.keys(patch).length) { closeEdit(refs); return; }
 
       api("PATCH", API + "/forward/" + idPath(keyOf(cur)), patch).then(function () {
@@ -1441,6 +1741,141 @@
         schedule(true);
       });
   }
+
+  /* ---- discovery ----------------------------------------------------- */
+
+  // Addresses that mean "the remote's own loopback", which is what a mapping with no
+  // target host already reaches. Anything else is a specific interface and has to be
+  // named on the forward to be reachable at all.
+  var WILDCARD = {
+    "": 1, "0.0.0.0": 1, "*": 1, "::": 1, "127.0.0.1": 1, "::1": 1, "localhost": 1
+  };
+
+  var probing = false;
+
+  function setProbeNote(msg, bad) {
+    probeNote.textContent = msg || "";
+    probeNote.classList.toggle("bad", !!bad);
+    probeNote.classList.toggle("hidden", !msg);
+  }
+
+  function runProbe() {
+    var alias = probeHost.value;
+    if (!alias || probing) return;
+    probing = true;
+    probeRun.disabled = true;
+    probeRun.textContent = "looking…";
+    setProbeNote("", false);
+
+    api("GET", API + "/hosts/" + encodeURIComponent(alias) + "/listeners")
+      .then(function (res) {
+        paintProbe(alias, (res && Array.isArray(res.listeners)) ? res.listeners : []);
+      })
+      .catch(function (err) {
+        if (err && err.auth) return;
+        probeTable.classList.add("hidden");
+        setProbeNote(err && err.message
+          ? err.message
+          : "Could not ask that host what it is listening on.", true);
+      })
+      .then(function () {
+        probing = false;
+        probeRun.disabled = false;
+        probeRun.textContent = "refresh";
+      });
+  }
+
+  function cell(text, cls) {
+    var td = document.createElement("td");
+    if (cls) td.className = cls;
+    td.textContent = text;
+    return td;
+  }
+
+  function paintProbe(alias, rows) {
+    probeRows.textContent = "";
+
+    if (!rows.length) {
+      probeTable.classList.add("hidden");
+      setProbeNote("Nothing listening on " + alias + " — or neither ss nor netstat is installed there.", false);
+      return;
+    }
+
+    rows.forEach(function (e) {
+      var tr = document.createElement("tr");
+      if (e.forwarded) tr.dataset.forwarded = "1";
+      tr.append(cell(String(e.port)), cell(e.address || "", "addr"));
+
+      var what = document.createElement("td");
+      what.className = "what";
+      if (e.container) {
+        what.appendChild(el("span", "ctr", e.container));
+        if (e.process) what.appendChild(document.createTextNode(" · " + e.process));
+      } else {
+        what.textContent = e.process || "—";
+      }
+      if (e.pid) what.title = "pid " + e.pid;
+      tr.appendChild(what);
+
+      var act = document.createElement("td");
+      if (e.forwarded) {
+        // Marked, not hidden: leaving the operator to wonder where a port went is
+        // worse than one row saying it is already patched.
+        var done = el("span", "already", "patched");
+        var href = safeUrl({ url: e.url, direction: LOCAL_FWD });
+        if (href) {
+          done.textContent = "";
+          var a = document.createElement("a");
+          a.href = href;
+          a.target = "_blank";
+          a.rel = "noopener noreferrer";
+          a.textContent = "patched";
+          a.title = "Open " + href;
+          done.appendChild(a);
+        }
+        act.appendChild(done);
+      } else {
+        var b = el("button", "fwdbtn", "Forward");
+        b.type = "button";
+        b.addEventListener("click", function () { prefillFrom(alias, e); });
+        act.appendChild(b);
+      }
+      tr.appendChild(act);
+      probeRows.appendChild(tr);
+    });
+
+    probeTable.classList.remove("hidden");
+    setProbeNote(rows.length + " listening on " + alias + ".", false);
+  }
+
+  // Forward opens the add form filled in rather than creating the mapping outright:
+  // the local port, the label and the lease are still decisions, and a button that
+  // silently patches something is a button people stop trusting.
+  function prefillFrom(alias, e) {
+    openAdd(alias);
+    addForm.elements["direction"].value = LOCAL_FWD;
+    syncDir();
+    if (hostSel.value !== alias) {
+      paintHosts(alias);
+      hostSel.value = alias;
+      syncHostNote();
+    }
+    addForm.elements["remote_port"].value = String(e.port);
+    addForm.elements["local_port"].value = "";
+    addForm.elements["label"].value = e.container || e.process || "";
+    // A wildcard or loopback listener is reached through the remote's own localhost,
+    // which is the default; anything else has to be named.
+    addForm.elements["remote_host"].value = WILDCARD[e.address] ? "" : String(e.address || "");
+    addForm.elements["local_port"].focus();
+  }
+
+  probeRun.addEventListener("click", runProbe);
+  probeHost.addEventListener("change", function () {
+    // The table described a different machine a moment ago.
+    probeRows.textContent = "";
+    probeTable.classList.add("hidden");
+    setProbeNote("", false);
+  });
 
   /* ---- render -------------------------------------------------------- */
 
@@ -1503,16 +1938,22 @@
 
     firstPaint = false;
 
-    var live = rows.filter(function (r) { return r.state !== "dead"; }).length;
-    var dead = rows.length - live;
+    var dead = rows.filter(function (r) { return r.state === "dead"; }).length;
+    var waiting = rows.filter(function (r) { return r.state === "reconnecting"; }).length;
+    var live = rows.length - dead - waiting;
+    // The daemon answered, so the link to IT is up; a reconnecting host is a different
+    // statement and belongs in the count, not in the dot.
     summaryEl.dataset.link = "up";
     summaryTx.textContent = rows.length === 0
       ? "connected"
-      : live + " patched" + (dead ? ", " + dead + " dead" : "");
+      : live + " patched" +
+        (waiting ? ", " + waiting + " reconnecting" : "") +
+        (dead ? ", " + dead + " dead" : "");
 
     emptyEl.classList.toggle("hidden", rows.length !== 0);
     downEl.classList.add("hidden");
     footEl.classList.remove("hidden");
+    document.getElementById("probe").classList.remove("hidden");
   }
 
   function renderDown() {
@@ -1527,6 +1968,8 @@
     // would only produce a confusing failure.
     closeAdd();
     footEl.classList.add("hidden");
+    // Discovery needs the daemon to reach the other machine for us.
+    document.getElementById("probe").classList.add("hidden");
   }
 
   function poll() {
@@ -1543,7 +1986,26 @@
       })
       .then(function (data) {
         if (data === null) return;
-        render(Array.isArray(data) ? data : []);
+        var rows = Array.isArray(data) ? data : [];
+        var waiting = rows.some(function (r) { return r.state === "reconnecting"; });
+        if (!waiting) {
+          hostHealth = {};
+          render(rows);
+          return;
+        }
+        // Only fetched when a row actually says it is reconnecting, so the ordinary
+        // case stays at one request per poll. The detail — which attempt, how long
+        // until the next — lives on /admin/status, not on the mapping.
+        return fetch(API + "/status", {
+          credentials: "same-origin",
+          headers: { "Accept": "application/json" }
+        })
+          .then(function (res) { return res.ok ? res.json() : null; })
+          .catch(function () { return null; })
+          .then(function (st) {
+            hostHealth = (st && st.hosts) || {};
+            render(rows);
+          });
       })
       .catch(function () { renderDown(); });
   }

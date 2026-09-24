@@ -18,9 +18,12 @@ func testServer(t *testing.T) (http.Handler, *manager, *fakeRunner) {
 	return newServer(m, m.cfg), m, fr
 }
 
+// post creates a mapping the way the console does: logged in, through /admin/forward.
+// There is no anonymous way to do it any more, so every test that opens a forward over
+// HTTP goes through here.
 func post(t *testing.T, h http.Handler, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	return do(t, h, "POST", "/api/forward", body, nil)
+	return do(t, h, "POST", "/admin/forward", body, adminCookie(t, h))
 }
 
 func do(t *testing.T, h http.Handler, method, path, body string, cookie *http.Cookie) *httptest.ResponseRecorder {
@@ -75,47 +78,65 @@ func TestOpenHappyPath(t *testing.T) {
 	}
 }
 
-// The two capabilities an anonymous caller must not have. Anything on the remote VM can
-// reach /api, so these are the boundary of what it may ask for.
-func TestPublicAPIRefusesAdminCapabilities(t *testing.T) {
+// Everything the old public tier was refused is now simply what /admin/forward does. A
+// remote-forward, a browser open, a target host on the remote and a pin all go through
+// the one authenticated route.
+func TestAdminForwardCoversEveryCapability(t *testing.T) {
 	h, m, _ := testServer(t)
-	var opened []string
-	m.openURL = func(u string) { opened = append(opened, u) }
-
-	if w := post(t, h, `{"direction":"remote-forward","local_port":3000}`); w.Code != 403 {
-		t.Errorf("remote-forward accepted anonymously: %d %s", w.Code, w.Body)
-	}
-	if w := post(t, h, `{"remote_port":8530,"open":true}`); w.Code != 403 {
-		t.Errorf("open accepted anonymously: %d %s", w.Code, w.Body)
-	}
-	if len(opened) != 0 {
-		t.Fatalf("a browser was opened for an anonymous caller: %v", opened)
-	}
-	if n := len(m.List()); n != 0 {
-		t.Fatalf("a refused request still created %d forward(s)", n)
-	}
-}
-
-func TestAdminMayDoWhatPublicMayNot(t *testing.T) {
-	h, m, _ := testServer(t)
+	m.cfg.MaxForwards = 20
 	var opened []string
 	m.openURL = func(u string) { opened = append(opened, u) }
 	c := adminCookie(t, h)
 
 	if w := do(t, h, "POST", "/admin/forward", `{"direction":"remote-forward","local_port":3000}`, c); w.Code != 200 {
-		t.Fatalf("admin remote-forward rejected: %d %s", w.Code, w.Body)
+		t.Fatalf("remote-forward rejected: %d %s", w.Code, w.Body)
 	}
 	if w := do(t, h, "POST", "/admin/forward", `{"remote_port":8530,"open":true}`, c); w.Code != 200 {
-		t.Fatalf("admin open rejected: %d %s", w.Code, w.Body)
+		t.Fatalf("open rejected: %d %s", w.Code, w.Body)
 	}
+	if w := do(t, h, "POST", "/admin/forward", `{"remote_port":5432,"remote_host":"db","local_port":15432}`, c); w.Code != 200 {
+		t.Fatalf("target host on the remote rejected: %d %s", w.Code, w.Body)
+	}
+	if w := do(t, h, "POST", "/admin/forward", `{"remote_port":9100,"pinned":true}`, c); w.Code != 200 {
+		t.Fatalf("pin rejected: %d %s", w.Code, w.Body)
+	}
+	if w := do(t, h, "POST", "/admin/forward", `{"remote_port":8000,"remote_port_end":8002}`, c); w.Code != 200 {
+		t.Fatalf("range rejected: %d %s", w.Code, w.Body)
+	}
+
 	if len(opened) != 1 || opened[0] != "http://127.0.0.1:8530" {
 		t.Fatalf("opened %v, want only the server-built loopback URL", opened)
 	}
+	if n := len(m.List()); n != 7 {
+		t.Fatalf("%d mappings, want 7 (remote, open, target, pin, three of a range)", n)
+	}
+	if n := len(m.pins.List()); n != 1 {
+		t.Fatalf("%d pins, want the one that was asked for", n)
+	}
+
+	// And a remote-forward closes through the same route it was created by.
+	var id string
+	for _, v := range m.List() {
+		if v.Direction == string(dirRemote) {
+			id = v.ID
+		}
+	}
+	if w := do(t, h, "DELETE", "/admin/forward/"+id, "", c); w.Code != 200 {
+		t.Fatalf("close of a remote-forward: %d %s", w.Code, w.Body)
+	}
 }
 
-func TestAdminRoutesRejectUnauthenticated(t *testing.T) {
+// The whole authority model in one assertion: GET /, POST /admin/login and POST /admin/logout are
+// the only routes an anonymous caller gets anything but a 401 from. This is the list the retired
+// control channel used to sit outside of, so it is worth checking exhaustively rather
+// than per feature.
+func TestEveryRouteButRootAndLoginRequiresASession(t *testing.T) {
 	h, _, _ := testServer(t)
 	cases := []struct{ method, path, body string }{
+		{"GET", "/admin/hosts", ""},
+		{"POST", "/admin/hosts", `{"alias":"box2"}`},
+		{"DELETE", "/admin/hosts/box2", ""},
+		{"GET", "/admin/hosts/code/listeners", ""},
 		{"GET", "/admin/status", ""},
 		{"GET", "/admin/forwards", ""},
 		{"POST", "/admin/forward", `{"remote_port":8530}`},
@@ -127,6 +148,35 @@ func TestAdminRoutesRejectUnauthenticated(t *testing.T) {
 			t.Errorf("%s %s: code %d, want 401", c.method, c.path, w.Code)
 		}
 	}
+
+	// The three that are deliberately open. The shell carries no data, login is how a
+	// session starts, and logout can only end the session it is handed — none of them
+	// exercises any authority.
+	if w := do(t, h, "GET", "/", "", nil); w.Code != 200 {
+		t.Errorf("GET /: code %d, want the console shell", w.Code)
+	}
+	if w := do(t, h, "POST", "/admin/login", `{"password":"`+testPassword+`"}`, nil); w.Code != 200 {
+		t.Errorf("POST /admin/login: code %d, want 200", w.Code)
+	}
+	if w := do(t, h, "POST", "/admin/logout", "", nil); w.Code != 200 {
+		t.Errorf("POST /admin/logout without a session: code %d, want 200 (nothing to end, nothing leaked)", w.Code)
+	}
+
+	// The routes the control channel used to answer on are gone, not merely gated: a
+	// 401 here would mean the handler was still wired up.
+	for _, c := range []struct{ method, path, body string }{
+		{"GET", "/api/forwards", ""},
+		{"POST", "/api/forward", `{"remote_port":8530}`},
+		{"DELETE", "/api/forward/code:local-forward:8530", ""},
+		{"POST", "/forward", `{"remote_port":8530}`},
+		{"GET", "/forwards", ""},
+		{"DELETE", "/forward/8530", ""},
+	} {
+		if w := do(t, h, c.method, c.path, c.body, nil); w.Code != 404 {
+			t.Errorf("%s %s: code %d, want 404 — the route should not exist", c.method, c.path, w.Code)
+		}
+	}
+
 	// A made-up cookie is not a session.
 	bogus := &http.Cookie{Name: sessionCookie, Value: "deadbeef"}
 	if w := do(t, h, "GET", "/admin/status", "", bogus); w.Code != 401 {
@@ -187,7 +237,7 @@ func TestPasswordNeverAppearsInAnyResponse(t *testing.T) {
 		do(t, h, "GET", "/", "", c),   // console
 		do(t, h, "GET", "/admin/status", "", c),
 		do(t, h, "GET", "/admin/forwards", "", c),
-		do(t, h, "GET", "/api/forwards", "", nil),
+		do(t, h, "GET", "/admin/forwards", "", nil), // unauthorized error path
 		do(t, h, "POST", "/admin/login", `{"password":"wrong"}`, nil),
 		do(t, h, "POST", "/admin/login", `{"password":"`+testPassword+`"}`, nil),
 		do(t, h, "GET", "/admin/status", "", nil), // unauthorized error path
@@ -204,7 +254,9 @@ func TestPasswordNeverAppearsInAnyResponse(t *testing.T) {
 	}
 }
 
-// Without a password the daemon must fail closed rather than open.
+// Without a password the daemon must fail closed rather than open. With no public API
+// left, that means it can do nothing at all except serve the login page — which is what
+// the startup log now says in as many words.
 func TestAdminDisabledFailsClosed(t *testing.T) {
 	m, _ := testManager(t)
 	m.cfg.AdminPassword = ""
@@ -213,12 +265,22 @@ func TestAdminDisabledFailsClosed(t *testing.T) {
 	if w := do(t, h, "POST", "/admin/login", `{"password":""}`, nil); w.Code != 503 {
 		t.Errorf("login with admin disabled: code %d, want 503", w.Code)
 	}
-	if w := do(t, h, "GET", "/admin/status", "", nil); w.Code != 503 {
-		t.Errorf("admin route with admin disabled: code %d, want 503", w.Code)
+	for _, c := range []struct{ method, path, body string }{
+		{"GET", "/admin/status", ""},
+		{"GET", "/admin/forwards", ""},
+		{"POST", "/admin/forward", `{"remote_port":8530}`},
+		{"DELETE", "/admin/forward/code:local-forward:8530", ""},
+	} {
+		if w := do(t, h, c.method, c.path, c.body, nil); w.Code != 503 {
+			t.Errorf("%s %s with admin disabled: code %d, want 503", c.method, c.path, w.Code)
+		}
 	}
-	// The public API keeps working.
-	if w := post(t, h, `{"remote_port":8530}`); w.Code != 200 {
-		t.Errorf("public API broken when admin is disabled: %d %s", w.Code, w.Body)
+	if n := len(m.List()); n != 0 {
+		t.Fatalf("something got through with admin disabled: %d mapping(s)", n)
+	}
+	// The shell still serves, so the page can say why nothing works.
+	if w := do(t, h, "GET", "/", "", nil); w.Code != 200 {
+		t.Errorf("GET / with admin disabled: code %d, want the login page", w.Code)
 	}
 }
 
@@ -251,22 +313,6 @@ func TestRootIsPublicShellButCarriesNoSecrets(t *testing.T) {
 	}
 	if w := do(t, h, "GET", "/admin/forwards", "", c); w.Code != 200 {
 		t.Fatalf("authenticated /admin/forwards: %d", w.Code)
-	}
-}
-
-func TestPublicCloseCannotTouchRemoteForward(t *testing.T) {
-	h, m, _ := testServer(t)
-	c := adminCookie(t, h)
-	if w := do(t, h, "POST", "/admin/forward", `{"direction":"remote-forward","local_port":3000}`, c); w.Code != 200 {
-		t.Fatalf("setup: %d %s", w.Code, w.Body)
-	}
-	id := m.List()[0].ID
-
-	if w := do(t, h, "DELETE", "/api/forward/"+id, "", nil); w.Code != 403 {
-		t.Fatalf("anonymous caller closed a remote-forward: %d", w.Code)
-	}
-	if w := do(t, h, "DELETE", "/admin/forward/"+id, "", c); w.Code != 200 {
-		t.Fatalf("admin close: %d %s", w.Code, w.Body)
 	}
 }
 
@@ -305,47 +351,27 @@ func TestCapacityReturns429(t *testing.T) {
 	}
 }
 
-// The client deployed before /api existed still posts to /forward.
-func TestLegacyRoutesStillWork(t *testing.T) {
-	h, _, fr := testServer(t)
-	if w := do(t, h, "POST", "/forward", `{"remote_port":8530}`, nil); w.Code != 200 {
-		t.Fatalf("legacy open: %d %s", w.Code, w.Body)
-	}
-	if w := do(t, h, "GET", "/forwards", "", nil); w.Code != 200 {
-		t.Fatalf("legacy list: %d", w.Code)
-	}
-	if w := do(t, h, "DELETE", "/forward/8530", "", nil); w.Code != 200 {
-		t.Fatalf("legacy close: %d %s", w.Code, w.Body)
-	}
-	if !fr.sawSubcommand("cancel") {
-		t.Fatal("no ssh -O cancel issued")
-	}
-}
-
 func TestCloseEndpoint(t *testing.T) {
 	h, m, fr := testServer(t)
+	c := adminCookie(t, h)
 	post(t, h, `{"remote_port":8530}`)
 	id := m.List()[0].ID
 
-	if w := do(t, h, "DELETE", "/api/forward/"+id, "", nil); w.Code != 200 {
+	if w := do(t, h, "DELETE", "/admin/forward/"+id, "", c); w.Code != 200 {
 		t.Fatalf("code %d: %s", w.Code, w.Body)
 	}
 	if !fr.sawSubcommand("cancel") {
 		t.Fatal("no ssh -O cancel issued")
 	}
-	if w := do(t, h, "DELETE", "/api/forward/"+id, "", nil); w.Code != 404 {
+	if w := do(t, h, "DELETE", "/admin/forward/"+id, "", c); w.Code != 404 {
 		t.Fatalf("second close: code %d, want 404", w.Code)
 	}
 }
 
-func TestEditIsAdminOnlyAndUpdatesLabel(t *testing.T) {
+func TestEditUpdatesLabel(t *testing.T) {
 	h, m, _ := testServer(t)
 	post(t, h, `{"remote_port":8530,"label":"before"}`)
 	id := m.List()[0].ID
-
-	if w := do(t, h, "PATCH", "/api/forward/"+id, `{"label":"after"}`, nil); w.Code == 200 {
-		t.Fatal("edit is reachable without admin")
-	}
 
 	c := adminCookie(t, h)
 	if w := do(t, h, "PATCH", "/admin/forward/"+id, `{"label":"after"}`, c); w.Code != 200 {
@@ -360,7 +386,7 @@ func TestListEndpointShape(t *testing.T) {
 	h, _, _ := testServer(t)
 	post(t, h, `{"remote_port":8530,"label":"mkdp"}`)
 
-	w := do(t, h, "GET", "/api/forwards", "", nil)
+	w := do(t, h, "GET", "/admin/forwards", "", adminCookie(t, h))
 	if w.Code != 200 {
 		t.Fatalf("code %d", w.Code)
 	}

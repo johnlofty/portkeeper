@@ -14,13 +14,27 @@ type fakeRunner struct {
 	calls [][]string
 	err   error
 	out   string
+
+	failCall int // 1-based index of the one call that should fail; 0 disables
+	failOut  string
 }
 
 func (f *fakeRunner) run(argv []string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, argv)
+	if f.failCall > 0 && len(f.calls) == f.failCall {
+		return f.failOut, errors.New("exit status 255")
+	}
 	return f.out, f.err
+}
+
+// failAt arms exactly one call to fail. A blanket failure would also break the cleanup
+// that follows it, which is precisely the behaviour under test in a rollback.
+func (f *fakeRunner) failAt(n int, out string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.failCall, f.failOut = n, out
 }
 
 func (f *fakeRunner) sawSubcommand(sub string) bool {
@@ -64,10 +78,11 @@ func testManager(t *testing.T) (*manager, *fakeRunner) {
 	m.pick = func() (int, error) { return 40000, nil }
 	m.alive = func(int) bool { return true }
 	m.openURL = func(string) {}
-	// A book with no ssh config and no hosts file resolves to PublicHosts alone, which
-	// keeps the admin path reachable in tests without depending on the real machine.
+	// A book with no ssh config and no hosts file resolves to EagerHosts alone, which
+	// keeps "code" reachable in tests without depending on the real machine.
 	dir := t.TempDir()
 	m.book = newHostBook(cfg, filepath.Join(dir, "ssh_config"), filepath.Join(dir, "hosts"))
+	m.pins = newPinBook(filepath.Join(dir, "pinned"))
 	m.setHealthy("code", true)
 	return m, fr
 }
@@ -139,7 +154,9 @@ func TestRejectsPortOutOfRange(t *testing.T) {
 	}
 }
 
-func TestRejectsHostOutsideAllowlist(t *testing.T) {
+// The host book is the whole rule now, so a name that is in none of its three sources is
+// the only thing a forward can be refused a host for.
+func TestRejectsHostOutsideTheBook(t *testing.T) {
 	m, _ := testManager(t)
 	_, _, err := m.Open(openReq{host: "evil", remotePort: 8530})
 	if !errors.Is(err, errUnknownHost) {
@@ -252,7 +269,7 @@ func TestCloseCancelsAndForgets(t *testing.T) {
 	if _, _, err := openTest(m, 8530); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.Close("code", 8530); err != nil {
+	if err := m.CloseID("code:local-forward:8530"); err != nil {
 		t.Fatal(err)
 	}
 	if n := len(m.List()); n != 0 {
@@ -261,7 +278,7 @@ func TestCloseCancelsAndForgets(t *testing.T) {
 	if !fr.sawSubcommand("cancel") {
 		t.Fatal("close did not issue ssh -O cancel")
 	}
-	if err := m.Close("code", 8530); !errors.Is(err, errNotFound) {
+	if err := m.CloseID("code:local-forward:8530"); !errors.Is(err, errNotFound) {
 		t.Fatalf("second close: got %v, want errNotFound", err)
 	}
 }

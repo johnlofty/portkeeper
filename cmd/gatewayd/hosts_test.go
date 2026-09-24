@@ -1,9 +1,9 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -80,7 +80,7 @@ func TestParseSSHConfigFollowsInclude(t *testing.T) {
 // ssh still parses its own flags, so a leading dash must never survive into the book.
 func TestAliasCannotLookLikeAnSSHFlag(t *testing.T) {
 	dir := t.TempDir()
-	cfg := &Config{PublicHosts: []string{"code"}}
+	cfg := &Config{EagerHosts: []string{"code"}}
 	book := newHostBook(cfg, filepath.Join(dir, "none"), filepath.Join(dir, "hosts"))
 
 	for _, bad := range []string{
@@ -107,7 +107,7 @@ func TestAliasCannotLookLikeAnSSHFlag(t *testing.T) {
 // Manual hosts are configuration, not runtime state: they must outlive a restart.
 func TestManualHostsPersist(t *testing.T) {
 	dir := t.TempDir()
-	cfg := &Config{PublicHosts: []string{"code"}}
+	cfg := &Config{EagerHosts: []string{"code"}}
 	file := filepath.Join(dir, "hosts")
 
 	first := newHostBook(cfg, filepath.Join(dir, "none"), file)
@@ -130,21 +130,23 @@ func TestManualHostsPersist(t *testing.T) {
 
 func TestOnlyManualHostsCanBeRemoved(t *testing.T) {
 	dir := t.TempDir()
-	cfg := &Config{PublicHosts: []string{"code"}}
+	cfg := &Config{EagerHosts: []string{"code"}}
 	sshCfg := writeFile(t, dir, "config", "Host discovered\n")
 	book := newHostBook(cfg, sshCfg, filepath.Join(dir, "hosts"))
 
 	if err := book.Remove("code"); err == nil {
-		t.Error("a public host was removable")
+		t.Error("an LG_HOSTS host was removable")
 	}
 	if err := book.Remove("discovered"); err == nil {
 		t.Error("an ssh_config host was removable")
 	}
 }
 
-// The whole point of the split: discovery must widen what the CONSOLE offers without
-// widening what an anonymous caller on a remote VM may ask for.
-func TestDiscoveredHostsAreAdminOnly(t *testing.T) {
+// There is one authority level now, so the host book is the whole rule: anything it
+// knows may be forwarded to, and anything it does not may not. A host that appears only
+// in ssh_config is reachable — that was already true for the console, and the console is
+// now the only caller there is.
+func TestAnyKnownHostMayBeTargetedAndNothingElse(t *testing.T) {
 	dir := t.TempDir()
 	sshCfg := writeFile(t, dir, "config", "Host router\n  HostName 192.168.1.1\n")
 
@@ -153,38 +155,37 @@ func TestDiscoveredHostsAreAdminOnly(t *testing.T) {
 	m.masters["router"] = &fakeMaster{up: true}
 	m.setHealthy("router", true)
 
-	admin := &openReq{host: "router", direction: dirLocal, remotePort: 8080, admin: true}
-	if err := m.validate(admin); err != nil {
-		t.Fatalf("admin path should reach a discovered host, got %v", err)
+	for _, known := range []string{"code", "router"} {
+		r := &openReq{host: known, direction: dirLocal, remotePort: 8080}
+		if err := m.validate(r); err != nil {
+			t.Errorf("host %q is in the book but was refused: %v", known, err)
+		}
 	}
 
-	public := &openReq{host: "router", direction: dirLocal, remotePort: 8080}
-	if err := m.validate(public); err == nil {
-		t.Fatal("the public API reached a host that is only in ssh_config")
+	unknown := &openReq{host: "nosuchbox", direction: dirLocal, remotePort: 8080}
+	if err := m.validate(unknown); !errors.Is(err, errUnknownHost) {
+		t.Fatalf("a host the book does not know: got %v, want errUnknownHost", err)
 	}
 }
 
-// The control channel is the remote's only route to this daemon. It must be requested
-// explicitly, because ssh_config's own RemoteForward silently loses the race whenever
-// another connection already holds that remote port.
-func TestEnsureControlChannelRequestsTheListenPort(t *testing.T) {
-	m, fr := testManager(t)
-	m.cfg.Listen = "127.0.0.1:9996"
+// LG_HOSTS no longer means "reachable from the remote"; it means "connected at startup".
+// It still sorts first, because those are the boxes in daily use.
+func TestConfiguredHostsSortFirst(t *testing.T) {
+	dir := t.TempDir()
+	sshCfg := writeFile(t, dir, "config", "Host aaa\nHost zzz\n")
+	cfg := &Config{EagerHosts: []string{"code"}}
+	book := newHostBook(cfg, sshCfg, filepath.Join(dir, "hosts"))
 
-	m.ensureControlChannel("code")
-
-	var found bool
-	for _, argv := range fr.calls {
-		joined := strings.Join(argv, " ")
-		if strings.Contains(joined, "-R") && strings.Contains(joined, "9996:localhost:9996") {
-			found = true
-			// It must still go through the ControlPath chokepoint like everything else.
-			if !strings.Contains(joined, "-o ControlPath=") {
-				t.Errorf("control channel request bypassed ControlPath: %s", joined)
-			}
-		}
+	list := book.List()
+	if len(list) < 3 {
+		t.Fatalf("book is too small to be testing an order: %+v", list)
 	}
-	if !found {
-		t.Fatalf("no -R request for the listen port; calls were %v", fr.calls)
+	if list[0].Alias != "code" || list[0].Source != srcEager {
+		t.Fatalf("the configured host does not come first: %+v", list)
+	}
+	for _, e := range list[1:] {
+		if e.Source == srcEager {
+			t.Fatalf("a second eager host appeared out of order: %+v", list)
+		}
 	}
 }

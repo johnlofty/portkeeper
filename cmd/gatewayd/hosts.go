@@ -26,20 +26,19 @@ var (
 type hostSource string
 
 const (
-	srcPublic    hostSource = "public"     // LG_HOSTS: reachable by the public /api
+	srcEager     hostSource = "eager"      // LG_HOSTS: connected at startup, not on first use
 	srcSSHConfig hostSource = "ssh-config" // discovered in ~/.ssh/config
 	srcManual    hostSource = "manual"     // typed into the console, persisted
 )
 
+// hostEntry is one machine the console may offer. Source says where it came from, which
+// is presentation only — every entry here is equally reachable to an authenticated
+// caller, and there is no other kind.
 type hostEntry struct {
 	Alias    string     `json:"alias"`
 	HostName string     `json:"hostname"`
 	User     string     `json:"user"`
 	Source   hostSource `json:"source"`
-	// Public marks a host the unauthenticated /api may target. Discovery deliberately
-	// does not grant this: a process on a remote VM could otherwise ask for a tunnel to
-	// anything in the ssh config, routers and all.
-	Public bool `json:"public"`
 }
 
 // parseSSHConfig pulls connectable aliases out of an ssh_config.
@@ -158,9 +157,10 @@ func (b *hostBook) save() error {
 	return os.WriteFile(b.file, []byte(strings.Join(b.manual, "\n")+"\n"), 0o600)
 }
 
-// List merges the three sources, newest information winning per alias: a host named in
-// LG_HOSTS is public even if ssh_config also describes it, and ssh_config supplies the
-// hostname and user that make the picker readable.
+// List merges the three sources, the first mention of an alias winning its source and
+// later ones filling in what it left blank: a host named in LG_HOSTS stays an LG_HOSTS
+// host even when ssh_config also describes it, and ssh_config supplies the hostname and
+// user that make the picker readable.
 func (b *hostBook) List() []hostEntry {
 	b.mu.Lock()
 	manual := append([]string(nil), b.manual...)
@@ -183,8 +183,8 @@ func (b *hostBook) List() []hostEntry {
 		order = append(order, e.Alias)
 	}
 
-	for _, h := range b.cfg.PublicHosts {
-		add(hostEntry{Alias: h, Source: srcPublic, Public: true})
+	for _, h := range b.cfg.EagerHosts {
+		add(hostEntry{Alias: h, Source: srcEager})
 	}
 	for _, h := range manual {
 		add(hostEntry{Alias: h, Source: srcManual})
@@ -195,8 +195,8 @@ func (b *hostBook) List() []hostEntry {
 
 	sort.Slice(order, func(i, j int) bool {
 		a, c := byAlias[order[i]], byAlias[order[j]]
-		if a.Public != c.Public {
-			return a.Public // the hosts that actually work from the remote come first
+		if ae, ce := a.Source == srcEager, c.Source == srcEager; ae != ce {
+			return ae // the configured hosts are the ones in daily use; they come first
 		}
 		return a.Alias < c.Alias
 	})
@@ -208,7 +208,7 @@ func (b *hostBook) List() []hostEntry {
 	return out
 }
 
-// Known reports whether an authenticated caller may target this host.
+// Known reports whether this is a host the daemon may be asked to forward to.
 func (b *hostBook) Known(alias string) bool {
 	for _, e := range b.List() {
 		if e.Alias == alias {
