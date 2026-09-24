@@ -61,7 +61,7 @@ struct ConsoleWebView: NSViewRepresentable {
         context.coordinator.loadedToken = token
         // "/" to "/#add" on a loaded page is a fragment navigation: the page gets a
         // hashchange, not a fresh load. Asking for the URL already showing reloads it, so
-        // a second "Add mapping" still opens the sheet.
+        // a second "Add" still opens the sheet.
         if view.url == url {
             view.reload()
         } else {

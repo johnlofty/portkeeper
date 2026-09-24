@@ -1201,3 +1201,102 @@ func (m *manager) Shutdown() {
 		m.masterFor(h).stop()
 	}
 }
+
+// hostInUse counts what still depends on a host: live mappings and pins. A host with
+// either cannot be removed — a pin would try to reopen its mapping every tick, against a
+// host the book no longer knows, forever.
+func (m *manager) hostInUse(host string) (mappings, pinned int) {
+	m.mu.Lock()
+	for _, f := range m.fwds {
+		if f.host == host {
+			mappings++
+		}
+	}
+	m.mu.Unlock()
+	if m.pins != nil {
+		for _, p := range m.pins.List() {
+			if p.Host == host {
+				pinned++
+			}
+		}
+	}
+	return mappings, pinned
+}
+
+// restartHost drops a host's master after its settings changed, so the next connection
+// is made with the new ones. The daemon keeps no copy of those settings: ssh reads them
+// from the wrapper each time, and a restart is the whole of "apply".
+//
+// The failure history is cleared too, or a host that was backing off before the edit
+// would sit out its window with settings that may now work. If mappings depend on the
+// host they are replayed straight away rather than on the next reconcile tick.
+func (m *manager) restartHost(host string) {
+	m.mu.Lock()
+	mc, ok := m.masters[host]
+	if hs, seen := m.hosts[host]; seen {
+		hs.attempts, hs.nextRetry, hs.lastErr = 0, time.Time{}, ""
+	}
+	m.mu.Unlock()
+	if !ok {
+		return
+	}
+	mc.stop()
+	m.setHealthy(host, false)
+	if n, _ := m.hostInUse(host); n == 0 {
+		return
+	}
+	go func() {
+		if err := m.ensureUp(host); err != nil {
+			logf("master %s: after a settings change: %v", host, err)
+			return
+		}
+		m.replay(host)
+	}()
+}
+
+// forgetHost stops a removed host's master and drops everything the manager knew about
+// it. The caller has already made sure nothing depends on it.
+func (m *manager) forgetHost(host string) {
+	m.mu.Lock()
+	mc, ok := m.masters[host]
+	delete(m.masters, host)
+	delete(m.hosts, host)
+	m.mu.Unlock()
+	if ok {
+		mc.stop()
+	}
+}
+
+// testHost makes one throwaway connection with a host's current settings. It returns
+// ssh's own words on failure, which say more than any paraphrase would.
+func (m *manager) testHost(host string) error {
+	argv := m.cfg.argvTest(host)
+	var err error
+	var out string
+	if br, ok := m.run.(boundedRunner); ok {
+		out, err = br.runBounded(argv, 20*time.Second)
+	} else {
+		out, err = m.run.run(argv)
+	}
+	if err == nil {
+		return nil
+	}
+	if msg := lastLine(out); msg != "" {
+		if strings.Contains(msg, "Permission denied") {
+			msg += ". If the key has a passphrase, add it to the agent or Keychain first: the daemon has no terminal to ask for it."
+		}
+		return errors.New(msg)
+	}
+	return err
+}
+
+// lastLine is the last non-empty line ssh printed, which is where it puts the reason.
+func lastLine(out string) string {
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if l := strings.TrimSpace(lines[i]); l != "" {
+			return l
+		}
+	}
+	return ""
+}

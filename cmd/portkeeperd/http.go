@@ -93,7 +93,10 @@ func newServer(m *manager, cfg *Config) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/hosts", s.listHosts)
 	mux.HandleFunc("POST /api/hosts", s.addHost)
+	mux.HandleFunc("PUT /api/hosts/{alias}", s.updateHost)
 	mux.HandleFunc("DELETE /api/hosts/{alias}", s.removeHost)
+	mux.HandleFunc("POST /api/hosts/{alias}/test", s.testHost)
+	mux.HandleFunc("GET /api/identities", s.identities)
 	mux.HandleFunc("GET /api/hosts/{alias}/listeners", s.hostListeners)
 	mux.HandleFunc("GET /api/status", s.status)
 	mux.HandleFunc("GET /api/forwards", s.list)
@@ -256,28 +259,104 @@ func (s *server) listHosts(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.m.book.List())
 }
 
-func (s *server) addHost(w http.ResponseWriter, r *http.Request) {
+// hostReq is a host as the console sends it. identities_only is a pointer because its
+// absence means "yes when there is an identity file", which is what almost everyone
+// wants and what ssh does not default to.
+type hostReq struct {
+	Alias          string `json:"alias"`
+	HostName       string `json:"hostname"`
+	User           string `json:"user"`
+	Port           int    `json:"port"`
+	IdentityFile   string `json:"identity_file"`
+	IdentitiesOnly *bool  `json:"identities_only"`
+	ProxyJump      string `json:"proxy_jump"`
+}
+
+func (h hostReq) entry() hostEntry {
+	e := hostEntry{
+		Alias: h.Alias, HostName: h.HostName, User: h.User, Port: h.Port,
+		IdentityFile: h.IdentityFile, ProxyJump: h.ProxyJump,
+	}
+	e.IdentitiesOnly = h.IdentitiesOnly == nil || *h.IdentitiesOnly
+	return e
+}
+
+func (s *server) readHost(w http.ResponseWriter, r *http.Request) (hostReq, bool) {
+	var in hostReq
 	body, err := readAndRestore(r)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "body too large")
-		return
-	}
-	var in struct {
-		Alias string `json:"alias"`
+		return in, false
 	}
 	if err := json.Unmarshal(body, &in); err != nil {
 		writeErr(w, http.StatusBadRequest, "malformed JSON body")
-		return
+		return in, false
 	}
 	if s.m.book == nil {
 		writeErr(w, http.StatusServiceUnavailable, "no host book")
-		return
+		return in, false
 	}
-	if err := s.m.book.Add(strings.TrimSpace(in.Alias)); err != nil {
+	return in, true
+}
+
+// writeHostErr names the field a refusal is about, when there is one, so the console
+// can mark the right input rather than showing a message at the top of the form.
+func writeHostErr(w http.ResponseWriter, err error) {
+	var fe *fieldError
+	switch {
+	case errors.As(err, &fe):
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": fe.Msg, "field": fe.Field})
+	case errors.Is(err, errHostMissing):
+		writeErr(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, errNotManual):
 		writeErr(w, http.StatusBadRequest, err.Error())
+	default:
+		writeErr(w, http.StatusInternalServerError, err.Error())
+	}
+}
+
+func (s *server) hostView(alias string) any {
+	for _, e := range s.m.book.List() {
+		if e.Alias == alias {
+			return e
+		}
+	}
+	return map[string]any{"ok": true}
+}
+
+func (s *server) addHost(w http.ResponseWriter, r *http.Request) {
+	in, ok := s.readHost(w, r)
+	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	e := in.entry()
+	if err := s.m.book.Add(e); err != nil {
+		writeHostErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.hostView(strings.TrimSpace(e.Alias)))
+}
+
+// updateHost replaces the settings of a host added in the console. The alias is the key
+// and comes from the path; the running connection is dropped so the next one uses the
+// new settings, and its mappings come back on their own.
+func (s *server) updateHost(w http.ResponseWriter, r *http.Request) {
+	alias := r.PathValue("alias")
+	in, ok := s.readHost(w, r)
+	if !ok {
+		return
+	}
+	if in.Alias != "" && strings.TrimSpace(in.Alias) != alias {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "a host's alias cannot be changed; remove it and add it again", "field": "alias"})
+		return
+	}
+	if err := s.m.book.Update(alias, in.entry()); err != nil {
+		writeHostErr(w, err)
+		return
+	}
+	s.m.restartHost(alias)
+	writeJSON(w, http.StatusOK, s.hostView(alias))
 }
 
 func (s *server) removeHost(w http.ResponseWriter, r *http.Request) {
@@ -285,11 +364,77 @@ func (s *server) removeHost(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, "no host book")
 		return
 	}
-	if err := s.m.book.Remove(r.PathValue("alias")); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+	alias := r.PathValue("alias")
+	if !s.m.book.IsManual(alias) {
+		writeErr(w, http.StatusBadRequest, errNotManual.Error())
 		return
 	}
+	if n, p := s.m.hostInUse(alias); n+p > 0 {
+		writeErr(w, http.StatusConflict, inUseMsg(alias, n, p))
+		return
+	}
+	if err := s.m.book.Remove(alias); err != nil {
+		writeHostErr(w, err)
+		return
+	}
+	s.m.forgetHost(alias)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func inUseMsg(alias string, mappings, pinned int) string {
+	plural := func(n int, one, many string) string {
+		if n == 1 {
+			return "1 " + one
+		}
+		return strconv.Itoa(n) + " " + many
+	}
+	close := " Close them first."
+	if mappings+pinned == 1 {
+		close = " Close it first."
+	}
+	switch {
+	case mappings > 0 && pinned > 0:
+		return alias + " still has " + plural(mappings, "mapping", "mappings") + " and " +
+			plural(pinned, "pinned mapping", "pinned mappings") + "." + close
+	case pinned > 0:
+		return alias + " still has " + plural(pinned, "pinned mapping", "pinned mappings") + "." + close
+	default:
+		return alias + " still has " + plural(mappings, "mapping", "mappings") + "." + close
+	}
+}
+
+// testHost connects once with a host's saved settings. A failure is still a 200: the
+// request worked, and the answer is that the host did not.
+func (s *server) testHost(w http.ResponseWriter, r *http.Request) {
+	alias := r.PathValue("alias")
+	if s.m.book == nil || !s.m.book.Known(alias) {
+		writeErr(w, http.StatusBadRequest, errUnknownHost.Error())
+		return
+	}
+	if err := s.m.testHost(alias); err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	out := map[string]any{"ok": true}
+	if fp := hostFingerprint(s.cfg, s.hostEntry(alias)); fp != "" {
+		out["fingerprint"] = fp
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *server) hostEntry(alias string) hostEntry {
+	for _, e := range s.m.book.List() {
+		if e.Alias == alias {
+			return e
+		}
+	}
+	return hostEntry{Alias: alias}
+}
+
+// identities lists the private keys in ~/.ssh, for the dialog's suggestions. Names
+// only: the daemon never reads, let alone returns, a key's contents.
+func (s *server) identities(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, listIdentities(sshDir()))
 }
 
 func (s *server) list(w http.ResponseWriter, r *http.Request) {

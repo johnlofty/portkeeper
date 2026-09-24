@@ -5,7 +5,10 @@ import (
 	"testing"
 )
 
-const testCP = "/tmp/lg-sockets/portkeeper-%r@%h-%p"
+const (
+	testCP      = "/tmp/lg-sockets/portkeeper-%r@%h-%p"
+	testWrapper = "/tmp/lg-config/ssh_config"
+)
 
 func testCfg() *Config {
 	return &Config{
@@ -13,6 +16,7 @@ func testCfg() *Config {
 		EagerHosts:  []string{"code"},
 		MaxForwards: 3,
 		ControlPath: testCP,
+		SSHWrapper:  testWrapper,
 	}
 }
 
@@ -35,6 +39,11 @@ func TestEverySSHArgvCarriesControlPath(t *testing.T) {
 	}
 
 	for name, argv := range argvs {
+		// A host added in the console exists for ssh only through the wrapper, so an
+		// invocation without it would not find that host at all.
+		if len(argv) < 2 || argv[0] != "-F" || argv[1] != testWrapper {
+			t.Errorf("%s: argv does not start with -F %s: %v", name, testWrapper, argv)
+		}
 		if !hasOpt(argv, "ControlPath="+testCP) {
 			t.Errorf("%s: argv has no explicit -o ControlPath=%s: %v", name, testCP, argv)
 		}
@@ -175,5 +184,28 @@ func TestMasterLogBuffersPartialLines(t *testing.T) {
 	l.Write([]byte("ne\n"))
 	if len(l.buf) != 0 {
 		t.Fatalf("buffer not drained after newline: %q", l.buf)
+	}
+}
+
+// The connection test must not ride on any master. ssh keeps the FIRST -o value it sees,
+// so this argv must not start with sshArgv's ControlPath, or ControlPath=none after it
+// would be ignored.
+func TestConnectionTestUsesNoMaster(t *testing.T) {
+	argv := testCfg().argvTest("pi2")
+	if argv[0] != "-F" || argv[1] != testWrapper {
+		t.Errorf("test argv does not use the wrapper: %v", argv)
+	}
+	for _, want := range []string{"ControlPath=none", "ControlMaster=no", "BatchMode=yes"} {
+		if !hasOpt(argv, want) {
+			t.Errorf("test argv has no -o %s: %v", want, argv)
+		}
+	}
+	for _, a := range argv {
+		if a == "ControlPath="+testCP {
+			t.Errorf("test argv carries the daemon's ControlPath, so it would reuse its master: %v", argv)
+		}
+	}
+	if argv[len(argv)-2] != "pi2" || argv[len(argv)-1] != "true" {
+		t.Errorf("test argv should end with the host and a no-op command: %v", argv)
 	}
 }

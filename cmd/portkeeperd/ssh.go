@@ -70,39 +70,64 @@ func (d direction) listenPort(local, remote int) int {
 	return local
 }
 
-// sshArgv prefixes every ssh invocation with an explicit ControlPath.
+// sshArgv prefixes every ssh invocation with the daemon's own config and an explicit
+// ControlPath.
 //
 // SAFETY: the user's own interactive master lives at ssh_config's default
 // ControlPath. `ssh -O exit` against that path would tear down their live
 // sessions, so the daemon never relies on the default — not once, anywhere.
-func sshArgv(controlPath string, rest ...string) []string {
-	argv := make([]string, 0, len(rest)+2)
-	argv = append(argv, "-o", "ControlPath="+controlPath)
+//
+// -F points at the generated wrapper (see writeSSHWrapper), which is how a host added in
+// the console exists for ssh at all without the user's config being touched.
+func (c *Config) sshArgv(rest ...string) []string {
+	argv := make([]string, 0, len(rest)+4)
+	if c.SSHWrapper != "" {
+		argv = append(argv, "-F", c.SSHWrapper)
+	}
+	argv = append(argv, "-o", "ControlPath="+c.ControlPath)
 	return append(argv, rest...)
 }
 
 func (c *Config) argvExit(host string) []string {
-	return sshArgv(c.ControlPath, "-O", "exit", host)
+	return c.sshArgv("-O", "exit", host)
 }
 
 func (c *Config) argvCheck(host string) []string {
-	return sshArgv(c.ControlPath, "-O", "check", host)
+	return c.sshArgv("-O", "check", host)
 }
 
 func (c *Config) argvMaster(host string) []string {
-	return sshArgv(c.ControlPath, "-M", "-N",
+	return c.sshArgv("-M", "-N",
 		"-o", "ControlMaster=yes", "-o", "ControlPersist=no", host)
+}
+
+// argvTest is a one-shot connection that proves a host's settings work, independently
+// of whether a master happens to be up.
+//
+// It is built by hand, NOT through sshArgv: ssh keeps the first -o value it sees, so a
+// ControlPath=none after sshArgv's would be ignored and the test would ride on the
+// daemon's master. With ControlMaster=no and no socket it cannot touch any master, the
+// user's or ours. BatchMode stops it waiting on a prompt nobody can answer.
+func (c *Config) argvTest(host string) []string {
+	argv := []string{}
+	if c.SSHWrapper != "" {
+		argv = append(argv, "-F", c.SSHWrapper)
+	}
+	return append(argv,
+		"-o", "ControlMaster=no", "-o", "ControlPath=none",
+		"-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
+		host, "true")
 }
 
 // argvForward and argvCancel must build the SAME spec for the same mapping: ssh matches
 // a cancel against the string it was given, so a remote host that is present on one and
 // absent on the other leaves a forward nothing can take down.
 func (c *Config) argvForward(host string, d direction, local, remote int, remoteHost string) []string {
-	return sshArgv(c.ControlPath, "-O", "forward", d.flag(), d.spec(local, remote, remoteHost), host)
+	return c.sshArgv("-O", "forward", d.flag(), d.spec(local, remote, remoteHost), host)
 }
 
 func (c *Config) argvCancel(host string, d direction, local, remote int, remoteHost string) []string {
-	return sshArgv(c.ControlPath, "-O", "cancel", d.flag(), d.spec(local, remote, remoteHost), host)
+	return c.sshArgv("-O", "cancel", d.flag(), d.spec(local, remote, remoteHost), host)
 }
 
 // argvListeners asks the remote what it is listening on. This is the only way to check
@@ -110,7 +135,7 @@ func (c *Config) argvCancel(host string, d direction, local, remote int, remoteH
 // No filter expression is passed, because that would have to survive the remote shell's
 // word splitting; parsing a short listing here is cheaper than getting quoting right.
 func (c *Config) argvListeners(host string) []string {
-	return sshArgv(c.ControlPath, host, "ss", "-ltnH")
+	return c.sshArgv(host, "ss", "-ltnH")
 }
 
 // discoverCmd is what a host is asked when the console wants to SHOW what is listening
@@ -132,7 +157,7 @@ const discoverCmd = `ss -ltnpH 2>/dev/null || netstat -tlnp 2>/dev/null; ` +
 	`docker ps --format '{{.Names}}\t{{.Ports}}' 2>/dev/null || true`
 
 func (c *Config) argvDiscover(host string) []string {
-	return sshArgv(c.ControlPath, host, discoverCmd)
+	return c.sshArgv(host, discoverCmd)
 }
 
 // portFailure matches the ports ssh names when a forward cannot be set up, e.g.
@@ -366,7 +391,7 @@ func (m *sshMaster) socketPathLocked() string {
 	if m.sock != "" {
 		return m.sock
 	}
-	out, err := m.run.run(sshArgv(m.cfg.ControlPath, "-G", m.host))
+	out, err := m.run.run(m.cfg.sshArgv("-G", m.host))
 	if err != nil {
 		return ""
 	}

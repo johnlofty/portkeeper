@@ -9,3 +9,6 @@ build/
 
 # Zips from `make dist`.
 dist/
+
+# SwiftPM build output from `swift build` / `swift test`.
+.build/

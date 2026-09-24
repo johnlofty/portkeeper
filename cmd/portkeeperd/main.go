@@ -33,8 +33,15 @@ func main() {
 	if err != nil {
 		log.Fatalf("listen %s: %v (is another portkeeperd already running?)", cfg.Listen, err)
 	}
+	// Before anything runs ssh: every invocation is given this file with -F.
+	if err := writeSSHWrapper(cfg); err != nil {
+		log.Fatalf("ssh config: %v", err)
+	}
 	run := execRunner{}
 	book := newHostBook(cfg, cfg.SSHConfigPath, cfg.HostsFile)
+	if n := book.importLegacy(cfg.LegacyHostsFile); n > 0 {
+		log.Printf("%d host(s) from %s need a host name before they can connect", n, cfg.LegacyHostsFile)
+	}
 
 	m := newManager(cfg, run, nil)
 	m.book = book

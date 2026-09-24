@@ -26,8 +26,25 @@ type Config struct {
 	// ssh config at startup would be absurd. They are connected on demand instead.
 	EagerHosts []string
 
+	// SSHConfigPath is the user's own ssh config. It is read — for discovery, and by
+	// ssh through the wrapper's Include — and never written.
 	SSHConfigPath string
-	HostsFile     string
+
+	// HostsFile holds the hosts added in the console, as ssh_config Host blocks the
+	// daemon alone writes. LegacyHostsFile is where the old console kept bare aliases;
+	// it is read once, for migration.
+	HostsFile       string
+	LegacyHostsFile string
+
+	// SSHWrapper is the config every daemon ssh invocation is given with -F. It
+	// includes HostsFile, then SSHConfigPath, then the system config, so a stanza added
+	// here wins and everything it leaves out still comes from the user's config.
+	// Empty means no -F, which only tests use.
+	SSHWrapper string
+
+	// KnownHostsFile is where host keys for console-added hosts are recorded, so that
+	// nothing new is ever written under ~/.ssh/.
+	KnownHostsFile string
 
 	// PinnedFile holds the mappings that are wanted across restarts. Like HostsFile it
 	// is configuration, not a cache of ssh's internals — see the comment on `pin`.
@@ -49,12 +66,25 @@ func loadConfig() (*Config, error) {
 		EagerHosts:    splitHosts(env("LG_HOSTS", "")),
 		SSHConfigPath: expandHome(env("LG_SSH_CONFIG", "~/.ssh/config"), home),
 		HostsFile: expandHome(env("LG_HOSTS_FILE",
-			filepath.Join(home, ".config", "portkeeper", "hosts")), home),
+			filepath.Join(home, ".config", "portkeeper", "hosts.conf")), home),
+		SSHWrapper: expandHome(env("LG_SSH_WRAPPER",
+			filepath.Join(home, ".config", "portkeeper", "ssh_config")), home),
+		KnownHostsFile: expandHome(env("LG_KNOWN_HOSTS",
+			filepath.Join(home, ".config", "portkeeper", "known_hosts")), home),
 		PinnedFile: expandHome(env("LG_PINNED_FILE",
 			filepath.Join(home, ".config", "portkeeper", "pinned")), home),
 		MaxForwards: envInt("LG_MAX_FORWARDS", 20),
 		DefaultTTL:  time.Duration(envInt("LG_DEFAULT_TTL", 28800)) * time.Second,
 		ControlPath: expandHome(env("LG_CONTROL_PATH", "~/.ssh/sockets/portkeeper-%r@%h-%p"), home),
+	}
+
+	// The old alias list lived beside the new file, so a daemon pointed at other files
+	// (a test, a second instance) never migrates the real one.
+	c.LegacyHostsFile = filepath.Join(filepath.Dir(c.HostsFile), "hosts")
+	if c.LegacyHostsFile == c.HostsFile {
+		// LG_HOSTS_FILE set to the old default: migrating that file onto itself would
+		// write hosts.conf and then overwrite it with the leftover aliases.
+		c.LegacyHostsFile = ""
 	}
 
 	// No eager hosts is a fine configuration, and the one a downloaded copy starts with:

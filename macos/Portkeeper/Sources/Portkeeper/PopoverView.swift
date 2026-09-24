@@ -75,14 +75,17 @@ struct PopoverView: View {
             Button {
                 showConsole(DaemonClient.addURL)
             } label: {
-                Label("Add mapping", systemImage: "plus")
+                Label("Add", systemImage: "plus")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 7)
+                    .lineLimit(1)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 5)
                     .background(Palette.accent, in: RoundedRectangle(cornerRadius: 6))
             }
             .buttonStyle(.plain)
+            .help("Add a mapping")
+            .accessibilityLabel("Add a mapping")
 
             Button("Open console") { showConsole(DaemonClient.consoleURL) }
                 .buttonStyle(.plain)
@@ -151,8 +154,8 @@ struct HostSectionView: View {
 
     private func retryText(_ h: HostHealth) -> String {
         h.nextRetryIn > 0
-            ? "attempt \(h.attempts), next try in \(h.nextRetryIn)s"
-            : "attempt \(h.attempts)"
+            ? "try \(h.attempts) · next in \(h.nextRetryIn)s"
+            : "try \(h.attempts)"
     }
 }
 
@@ -161,14 +164,14 @@ struct MappingRow: View {
     let forward: Forward
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             PortChip(port: forward.remotePort, caption: remoteCaption, alignment: .leading)
             // The arrowhead points at the side where the port APPEARS: a local-forward
             // makes a remote port show up on the Mac, a remote-forward the reverse.
             Cable(pointsRight: forward.isLocalForward)
                 .stroke(.secondary, style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
                 .overlay(CableDot(atLeft: forward.isLocalForward).fill(.secondary))
-                .frame(width: 56, height: 24)
+                .frame(width: 28, height: 14)
             PortChip(port: forward.localPort, caption: "Mac", alignment: .trailing)
             HStack(spacing: 6) {
                 Text(forward.label.isEmpty ? " " : forward.label)
@@ -182,7 +185,7 @@ struct MappingRow: View {
                         .help("Kept across restarts")
                 }
             }
-            .padding(.leading, 4)
+            .padding(.leading, 2)
             .frame(maxWidth: .infinity, alignment: .leading)
             .opacity(forward.isAlive ? 1 : 0.6)
 
@@ -202,7 +205,7 @@ struct MappingRow: View {
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.vertical, 4)
         .help(help)
     }
 
@@ -218,33 +221,38 @@ struct MappingRow: View {
     }
 }
 
+/// One line: the port, then the side it lives on as a grey caption (":3000 code").
 struct PortChip: View {
     let port: Int
     let caption: String
     let alignment: HorizontalAlignment
 
     var body: some View {
-        VStack(alignment: alignment, spacing: 3) {
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
             Text(verbatim: ":\(port)")
-                .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                .font(.system(size: 13, weight: .semibold, design: .monospaced))
                 .monospacedDigit()
                 .lineLimit(1)
-                .minimumScaleFactor(0.8)
+                .fixedSize()
             Text(caption)
-                .font(.system(size: 10))
+                .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
-        .frame(width: 72, alignment: alignment == .leading ? .leading : .trailing)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
+        // A floor, not a fixed width: ordinary chips line up in columns, a long one
+        // ("code → db", a five-digit port) grows, and the row's label gives way instead.
+        .frame(minWidth: 72, alignment: alignment == .leading ? .leading : .trailing)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .fixedSize()
         .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
         .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: .separatorColor)))
     }
 }
 
-/// The line and arrowhead of the mock's 56×24 cable, mirrored for a remote-forward.
+/// The line and arrowhead of the mock's 56×24 cable, drawn scaled to its frame and
+/// mirrored for a remote-forward.
 struct Cable: Shape {
     let pointsRight: Bool
 
@@ -268,9 +276,9 @@ struct CableDot: Shape {
     let atLeft: Bool
 
     func path(in rect: CGRect) -> Path {
-        let sx = rect.width / 56, sy = rect.height / 24
-        let cx = rect.minX + (atLeft ? 4 : 52) * sx
-        let cy = rect.minY + 12 * sy
-        return Path(ellipseIn: CGRect(x: cx - 3, y: cy - 3, width: 6, height: 6))
+        // Kept a fixed size and inset from the edge, so it stays whole at any cable width.
+        let r: CGFloat = 2.5
+        let cx = atLeft ? rect.minX + r + 0.5 : rect.maxX - r - 0.5
+        return Path(ellipseIn: CGRect(x: cx - r, y: rect.midY - r, width: 2 * r, height: 2 * r))
     }
 }
