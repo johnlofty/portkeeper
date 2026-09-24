@@ -2,9 +2,10 @@
 
 Port mappings between your Mac and a remote dev box, without hand-rolling `ssh -L`.
 
-A daemon on the Mac owns one SSH ControlMaster per host and adds or drops forwards on it
-on demand. You drive it from a web console on the Mac. Nothing on the remote can reach the
-daemon: its listener is loopback-only and no port is forwarded to it.
+portkeeper is a daemon on the Mac that keeps SSH port mappings to your remote dev boxes
+alive. It owns one OpenSSH ControlMaster per host and adds or drops forwards on it on
+demand, and you drive it from a web console or a menu-bar app. Nothing on the remote can
+reach the daemon: its listener is loopback-only and no port is forwarded to it.
 
 Two directions, named after the ssh flags they become:
 
@@ -13,7 +14,8 @@ Two directions, named after the ssh flags they become:
 | `local-forward`  | `-L` | A dev server on `code` opens in your Mac's browser                    |
 | `remote-forward` | `-R` | A service on your Mac (notifications, an API) is callable from `code` |
 
-`DESIGN.md` covers why it works this way, and what it used to be.
+This README describes what portkeeper is today. `DESIGN.md` records why it works this
+way, and what it used to be.
 
 ## How it works
 
@@ -21,6 +23,7 @@ Two directions, named after the ssh flags they become:
 flowchart LR
     subgraph mac["Your Mac"]
         browser["Browser"]
+        app["Portkeeper.app<br/>menu bar"]
         console["Console<br/>127.0.0.1:9996"]
         daemon["portkeeperd<br/>launchd agent"]
         pins[("pinned mappings<br/>~/.config/portkeeper")]
@@ -37,6 +40,7 @@ flowchart LR
     end
 
     browser --> console --> daemon
+    app -->|"/api, polled"| daemon
     daemon -->|"ssh -O forward, cancel, check<br/>ss for discovery"| master
     daemon <-->|"re-created at startup<br/>and on every 30s tick"| pins
     master ===|"one multiplexed SSH connection"| sshd
@@ -56,184 +60,203 @@ Every thirty seconds the daemon checks each master, restarts and replays a dead 
 backoff, dials every local-forward to prove it still answers, and re-creates any pin
 whose mapping is missing.
 
+## Install the app
+
+Download `Portkeeper-<tag>-macos-arm64.zip` from the repository's
+[Releases page](https://github.com/johnlofty/portkeeper/releases). The repository is
+currently private, so that page is only reachable by its collaborators until it is made
+public.
+
+The build is Apple Silicon only. It is ad-hoc signed and **not notarized**, so on macOS 15
+and later a downloaded copy is blocked the first time you open it. To get past that:
+
+1. Unzip it and move `Portkeeper.app` to `/Applications` first, and launch it from there.
+   Registering the background helper records where the app is, so a copy registered from
+   `~/Downloads` breaks when it moves.
+2. Open it. When macOS refuses, go to System Settings > Privacy & Security and click
+   **Open Anyway**. Or clear the quarantine flag yourself:
+   `xattr -dr com.apple.quarantine /Applications/Portkeeper.app`
+3. In the app's Settings > Background helper, click **Register**. If macOS asks, approve it
+   once in System Settings > Login Items; until then the helper is registered but never
+   starts, and Settings says so.
+
+You need macOS 14 or later, OpenSSH with your hosts in `~/.ssh/config`, and ssh keys or an
+agent that let `ssh <host>` connect without a prompt.
+
+## Install from the repo
+
+| Target             | What it does |
+| ------------------ | ------------ |
+| `make install`     | Builds `bin/portkeeperd`, renders the tracked plist with this checkout's path into `~/Library/LaunchAgents/io.github.johnlofty.portkeeper.plist`, and loads it |
+| `make uninstall`   | Unloads that agent and removes its plist |
+| `make app`         | Builds `build/Portkeeper.app`, the Swift app with `portkeeperd` bundled inside, ad-hoc signed. Registers nothing |
+| `make app-install` | Builds the app, unloads and removes the dev agent, and copies the bundle to `~/Applications/Portkeeper.app` |
+| `make dist`        | Builds the app and zips it with `ditto` to `dist/Portkeeper-$(VERSION)-macos-arm64.zip` (`VERSION` defaults to `dev`) |
+| `make build`, `make run` | Builds the daemon; runs it in the foreground |
+
+**Only one daemon can run.** The dev agent (`io.github.johnlofty.portkeeper`, from
+`make install`) and the bundled helper (`io.github.johnlofty.portkeeper.helper`, inside
+the app) both bind 127.0.0.1:9996, and the listen port is the daemon's singleton lock:
+whichever starts second exits on it, and launchd keeps retrying it, filling the log. To
+try the app against the dev agent, open `build/Portkeeper.app` and leave the helper
+unregistered. To switch to the helper, run `make app-install`, then register from
+Settings in `~/Applications/Portkeeper.app`, the copy that will stay.
+
+Either way the daemon uses its own private ControlPath, so it never fights your
+interactive sessions for a socket. Quitting the app does not stop the daemon or drop any
+mapping; launchd owns it.
+
 ## The console
 
-<http://127.0.0.1:9996/> on the Mac (or `localhost:9996`). There is no login: the page
-loads straight into its table. From there: create, edit and delete mappings in either
-direction, pin the ones you want to survive a restart, see what a host is listening on and
-forward it in one click, and add hosts.
+<http://127.0.0.1:9996/> on the Mac (or `localhost:9996`). The left rail lists hosts: the
+`LG_HOSTS` entries, the `Host` aliases in `~/.ssh/config` (patterns such as `Host *`
+are skipped), and any you add there (saved to
+`~/.config/portkeeper/hosts`). Picking one shows its mappings as a table of cables, remote
+port on one side and Mac port on the other, with the arrow pointing where the port
+appears, and a row's state (alive, dead, or reconnecting with the attempt count).
 
-What protects it is that the daemon refuses cross-site browser requests. A request whose
-`Host` is not the daemon's own address gets a 400, one the browser marks as coming from
-another site or origin (`Sec-Fetch-Site`, `Origin`) gets a 403, and a write whose body is
-not `application/json` gets a 415. So a web page open in your browser, including a dev
-server you have forwarded to `127.0.0.1`, cannot drive it. A request with no browser
-headers at all is served, so `curl` from a terminal works:
+**Add mapping** opens a sheet: direction, remote port or range, local port (blank to
+mirror), target host on the remote, a label, an expiry of 1h, 8h, 24h or never, **Keep
+across restarts**, and whether to open it in the browser when ready. Rows can be edited,
+pinned and closed. **Listening on** asks the host what it is running and offers a Forward
+button per port. Opening the console at `/#add` goes straight to the sheet. The page
+follows the system's light or dark appearance.
+
+There is no login. What protects the console is that the daemon refuses cross-site
+browser requests:
+
+- a request whose `Host` is not the daemon's own address gets a 400;
+- one the browser marks as coming from another site or origin (`Sec-Fetch-Site` other
+  than `same-origin` or `none`, or a foreign `Origin`) gets a 403;
+- a write whose body is not `application/json` gets a 415.
+
+`GET /`, the page shell, gets the Host check only, so following a link to it still works.
+So a web page open in your browser, including a dev server you have forwarded to
+`127.0.0.1`, cannot drive it. A request with no browser headers at all is served, so
+`curl` from a terminal works:
 
 ```sh
+curl -s http://127.0.0.1:9996/api/status
 curl -s http://127.0.0.1:9996/api/forwards
 curl -s -X POST -H 'Content-Type: application/json' \
      -d '{"remote_port":8530}' http://127.0.0.1:9996/api/forward
 ```
 
-That is also the limit of it. Anything running as you on the Mac can reach the daemon, as
-it always could: a password file that process could read never stopped it. A mapping
-cannot use the daemon's own port as its local port, in either direction; a remote-forward
-of it would publish the console to the remote.
+The other routes are `PATCH` and `DELETE /api/forward/{ref}`, `GET` and `POST /api/hosts`,
+`DELETE /api/hosts/{alias}`, and `GET /api/hosts/{alias}/listeners`.
 
-If you have `~/.config/portkeeper/api-password` from an earlier version (or
-`~/.config/local-gateway/api-password` from before the rename), nothing reads it any
-more. Delete it when you like.
+What is deliberately not defended: anything running as you on the Mac can reach the
+daemon, as it can read the ssh keys the daemon uses. The listener refuses to bind anything
+but loopback, and no mapping may use the daemon's own port as its local port, since a
+remote-forward of it would publish the console on the remote.
 
-## Install
+Upgrading from an older version: the login, the `/admin` routes, `expose` and the
+`RemoteForward 9996` control channel are removed; see `DESIGN.md`. Nothing reads
+`~/.config/portkeeper/admin-password` any more, so delete it when you like.
 
-```sh
-make install          # builds bin/portkeeperd, loads the launchd agent
-```
+## The menu-bar app
 
-`make install` renders the tracked launchd plist with this checkout's path into
-`~/Library/LaunchAgents/io.github.johnlofty.portkeeper.plist` and loads it.
+The menu-bar item shows the count of mappings that are alive, or `!` when a host is
+reconnecting or the daemon cannot be reached. The popover lists each host, connected or
+reconnecting with its next retry, and under it each mapping as a remote chip, a cable and
+a Mac chip, with its label, a pin mark if it is kept across restarts, and a button to open
+a local-forward in the browser. It polls `GET /api/forwards` and `GET /api/status` on
+`http://127.0.0.1:9996` every two seconds, and posts a notification when a host
+reconnects or a mapping goes away.
 
-That is the whole install. The daemon opens its own SSH connection to each host in
-`LG_HOSTS` (default `code`) at startup, on a private ControlPath, so it never fights your
-interactive sessions for a socket and never tears one of them down.
+**Open console** shows the web console in a window of its own; **Add mapping** opens that
+window on `/#add`. The app has no native form and writes nothing itself.
+
+Settings has **Open at login** (the app as a login item), **Background helper** (its
+status, Register and Unregister, and a button to Login Items when approval is pending),
+and **Daemon** (its address, state and API version, and a button to open the log). Both
+registrations go through SMAppService.
+
+## Configuration
+
+The daemon reads environment variables; in the launchd plist they go under
+`EnvironmentVariables`.
+
+| Variable          | Default                                  | Meaning |
+| ----------------- | ---------------------------------------- | ------- |
+| `LG_LISTEN`       | `127.0.0.1:9996`                         | Console and API address; must be loopback |
+| `LG_HOSTS`        | `code`                                   | Comma-separated hosts whose masters open at startup |
+| `LG_SSH_CONFIG`   | `~/.ssh/config`                          | Where `Host` entries are discovered |
+| `LG_HOSTS_FILE`   | `~/.config/portkeeper/hosts`             | Hosts added in the console |
+| `LG_PINNED_FILE`  | `~/.config/portkeeper/pinned`            | Mappings kept across restarts |
+| `LG_MAX_FORWARDS` | `20`                                     | Cap on mappings |
+| `LG_DEFAULT_TTL`  | `28800` (seconds)                        | Expiry when a request gives none |
+| `LG_CONTROL_PATH` | `~/.ssh/sockets/portkeeper-%r@%h-%p`     | The daemon's own ControlPath |
+
+Hosts not in `LG_HOSTS` are dialled on first use. The hosts and pinned files are written
+0600 in a 0700 directory. Both launchd jobs log to `/tmp/portkeeper.log`.
+
+## Behaviors worth knowing
+
+**Pins.** A pinned mapping is re-created at startup and on any tick that finds it
+missing. Pinning clears the expiry, and closing a pinned mapping removes the pin. A pin to
+a host known only from `~/.ssh/config` brings that host's connection up at startup.
+
+**Discovery.** **Listening on** runs `ss` (or `netstat`) and `docker ps` on the host,
+capped at 15 seconds. Ports already mapped are marked rather than hidden.
+
+**Target host past the remote.** A local-forward may target a machine the remote can
+reach, such as a database box, via **target host on remote** or `remote_host`. It is
+validated like a host alias: letters, digits, dot, dash, underscore, no leading dash, no
+colons. IPv4 addresses pass; IPv6 literals are not supported. These mappings get a longer
+id, `code:local-forward:db:5432`.
+
+**Ranges.** `8000-8010` in the remote port field makes one independent mapping per port,
+up to 32 per request, within `LG_MAX_FORWARDS`. If one fails, only the ones that request
+created are rolled back. Editing does not take ranges.
+
+**Reconnecting.** A mapping on a host whose connection is down reads **reconnecting**, not
+dead. Retries back off 30s, 1m, 2m, 4m, 8m, then every 10 minutes, and never stop. Asking
+for a forward to that host retries at once. `GET /api/status` carries the per-host detail
+under `hosts`, and the `LG_HOSTS` list under `eager_hosts`.
+
+**Clean restarts.** A control socket left behind by a killed master is detected and
+removed before a new one starts, and a new master gets three seconds to settle before any
+forward is sent to it.
+
+`DESIGN.md` has the reasoning for each of these, and the incidents behind the last two.
 
 ## Checking it works
 
 ```sh
-make status                                  # is the agent loaded
+make status                                  # is the dev agent loaded
 make logs                                    # tail /tmp/portkeeper.log
 ssh -o 'ControlPath=~/.ssh/sockets/portkeeper-%r@%h-%p' -O check code
                                              # is the daemon's master up
 ```
 
-The log says `master code: up` a few seconds after start. If it says `still not ready`
-every thirty seconds, the host is unreachable or the connection is failing; the console's
-rows for that host read **reconnecting** with the attempt count.
+The log starts with `listening on 127.0.0.1:9996, hosts [code]` and says
+`master code: up` a few seconds later. If it says `still not ready` on every retry, the
+host is unreachable or the connection is failing, and the console's rows for that host
+read **reconnecting** with the attempt count. `make status` greps `launchctl list` for
+`io.github.johnlofty.portkeeper`, which matches the helper's label too; the app's Settings
+also shows the helper's state.
 
-## Hosts
+## Development
 
-The console picks a host from a list rather than taking a typed name. It merges three
-sources: `LG_HOSTS`, the `Host` entries in `~/.ssh/config`, and hosts added in the console
-(persisted to `~/.config/portkeeper/hosts`).
+`make test`, `make vet` and `make fmt` run `go test`, `go vet` and `gofmt` over the
+daemon. `make check` lints the launchd plist with `plutil`, since no compiler reads it.
 
-Any host in the list may be forwarded to. `LG_HOSTS` marks the ones whose connection is opened eagerly at startup; every other
-host is dialled on first use.
+The Swift package is in `macos/Portkeeper`: `swift build -c release` and `swift test`.
+`swift test` needs XCTest from Xcode: if `xcode-select -p` points at the Command Line
+Tools, prefix it with `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`.
+`macos/build-app.sh`, behind `make app`, does that for itself.
 
-Aliases are validated, not escaped: an alias becomes an argv element handed to ssh, so
-anything ssh might read as an option is rejected outright.
-
-## Pinned mappings
-
-A mapping marked **keep across restarts** in the console is written to
-`~/.config/portkeeper/pinned` (0600, override with `LG_PINNED_FILE`) and re-created on
-startup and on any reconcile tick that finds it missing. It is the one thing about a
-mapping that outlives the daemon.
-
-Pinning clears the TTL, because "keep this" and "drop this in eight hours" cannot both be
-true. Closing a pinned mapping removes the pin as well — otherwise the next tick would put
-it straight back.
-
-A pin to a host that only appears in `~/.ssh/config` brings that host's connection up
-eagerly at startup, rather than on first use like other discovered hosts. You asked for
-the mapping to exist; it cannot exist without the connection.
-
-## What is the remote listening on
-
-The console's **Listening on** section asks a host what it is running — `ss`, or `netstat`
-where `ss` is missing, plus `docker ps` — and offers a Forward button per row that opens
-the add form already filled in, with the process or container name as the label. Ports
-that are already mapped are marked rather than hidden, with a link to the one you have.
-
-This is `GET /api/hosts/{alias}/listeners`. The call is capped at 15 seconds, so a wedged
-docker daemon on the far side cannot hang the console.
-
-## Forwarding past the remote
-
-A local-forward may target a machine other than the remote's own localhost — the database
-box `code` can reach, say. Set **target host on remote** in the console, or `remote_host`
-on `POST /api/forward`; leave it empty for localhost, which is what every mapping meant
-before the field existed.
-
-The value goes straight into an ssh forward spec, so it is validated against the same
-character class as a host alias: letters, digits, dot, dash, underscore, no leading dash,
-**no colons**. IPv4 addresses pass. IPv6 literals do not and are not supported — the spec
-is colon-delimited, and bracket syntax inside it is exactly the ambiguity that rule exists
-to avoid.
-
-These mappings get a longer id — `code:local-forward:db:5432` instead of
-`code:local-forward:5432` — so a mapping to the remote itself and one to a third machine
-on the same port stay distinct. Ids of mappings without a target host are unchanged.
-
-## Ranges
-
-`8000-8010` in the console's remote port field creates one independent mapping per port,
-each with its own id, TTL and close button. Up to 32 ports per request, and the overall
-`LG_MAX_FORWARDS` cap still applies. If one port in a range fails, the ones that request
-just created are rolled back; mappings that already existed are left alone. Leave the
-local port blank to mirror, or give a single local port to have the range start there.
-
-Editing does not take ranges. Once made, they are just mappings.
-
-## When the link drops
-
-A mapping on a host whose SSH connection is down reads **reconnecting**, not dead, and the
-console says which attempt the daemon is on and when it will try again. Retries back off
-30s, 1m, 2m, 4m, 8m, then every 10 minutes — and never stop, because a laptop can sleep for
-hours and wake up wanting the same tunnels. Asking for a forward to that host from the
-console retries immediately, regardless of where the schedule had got to.
-
-`GET /api/status` carries the same per-host detail under `hosts`: whether it is healthy,
-how many attempts have failed, seconds until the next one, and the last error. The
-`LG_HOSTS` list is under `eager_hosts`.
-
-A daemon restart also starts clean: a control socket left behind by a killed master is
-detected and removed before a new one is started, and a new master is given a few seconds
-to settle before any forward is sent to it. Both of those are scars; `DESIGN.md` has the
-stories.
-
-## The menu-bar app
-
-`macos/` holds Portkeeper.app, a SwiftUI menu-bar client of the same daemon. It draws
-nothing the console does not already know: it polls `GET /api/forwards` and
-`GET /api/status` on `http://127.0.0.1:9996` every two seconds, shows each host with its
-mappings, and opens the console in a window of its own. **Add mapping** opens that window
-on `/#add`, the console's add sheet; there is no second, native form to drift from it.
-
-The menu-bar item is the count of mappings that are alive, or `!` when a host is
-reconnecting or the daemon cannot be reached. In each row the arrowhead points at the side
-where the port appears: right for a local-forward, left for a remote-forward.
+CI (`.github/workflows/ci.yml`) runs on every push to `main` and every pull request, on a
+`macos-15` runner: gofmt, vet, `go test -race`, `make check`, the Swift build and tests,
+then `make dist`, uploading the zip as a workflow artifact. The release workflow
+(`.github/workflows/release.yml`) runs on every `v*` tag: it builds with
+`make dist VERSION=<tag>`, verifies the bundle's signature and plists, and publishes
+`Portkeeper-<tag>-macos-arm64.zip` to GitHub Releases. To cut a release:
 
 ```sh
-make app              # builds build/Portkeeper.app, with portkeeperd bundled inside
-make app-install      # copies it to ~/Applications, unloads and removes the dev agent
+git tag v0.1.0 && git push origin v0.1.0
 ```
-
-Neither registers anything. The bundle carries its own launchd job,
-`io.github.johnlofty.portkeeper.helper`, which runs the bundled `portkeeperd`; it is
-registered from the app's **Settings > Background helper**, and macOS may then ask for a
-one-time approval in System Settings > Login Items. Until that is approved the helper is
-registered but never starts, and Settings says so.
-
-**Only one daemon can run.** The dev agent from `make install` and the bundled helper both
-bind 127.0.0.1:9996, and the listen port is the daemon's singleton lock: whichever starts
-second exits on it (and launchd retries it every ten seconds or so, filling the log). So
-pick one. To try the app against the dev agent, open `build/Portkeeper.app` and leave the
-helper unregistered. To switch to the bundled helper, `make app-install` (which unloads
-the dev agent and removes its plist, so it does not come back at next login), then
-register from Settings.
-
-**Run the app from where it will stay.** SMAppService records the bundle's location when
-the login item or the helper is registered, so registering from `build/` and then moving
-the app, or running `make app` again, leaves launchd pointing at a copy that changed or is
-gone. Register from `~/Applications/Portkeeper.app`.
-
-Quitting the app does not stop the daemon or drop any mapping; launchd owns it either way.
-
-`swift build -c release` and `swift test` work from `macos/Portkeeper`. `swift test`
-needs Xcode rather than the Command Line Tools, for XCTest: if `xcode-select -p` points at
-the CLT, prefix it with `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`.
-`build-app.sh` does that for itself.
 
 ## License
 
