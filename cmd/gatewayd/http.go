@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	localgateway "github.com/johnlofty/local-gateway"
+	localgateway "github.com/johnlofty/portkeeper"
 )
 
 const (

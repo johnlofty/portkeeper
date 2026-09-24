@@ -1,4 +1,4 @@
-# local-gateway
+# portkeeper
 
 An SSH-based port-forwarding gateway: a daemon on the Mac that accepts port-forward
 requests originating on a remote dev host, sets up the forward automatically against
