@@ -176,3 +176,7 @@ A daemon restart also starts clean: a control socket left behind by a killed mas
 detected and removed before a new one is started, and a new master is given a few seconds
 to settle before any forward is sent to it. Both of those are scars; `DESIGN.md` has the
 stories.
+
+## License
+
+[Anti 996 License, Version 1.0](https://github.com/996icu/996.ICU/blob/master/LICENSE) — see [LICENSE](LICENSE).
