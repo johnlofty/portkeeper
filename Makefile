@@ -76,7 +76,7 @@ APP_DEST     := $(HOME)/Applications/Portkeeper.app
 .PHONY: app app-install dist
 
 app:
-	macos/build-app.sh
+	VERSION="$(VERSION)" macos/build-app.sh
 
 app-install: app
 	-launchctl unload $(AGENTS)/$(PLIST) 2>/dev/null

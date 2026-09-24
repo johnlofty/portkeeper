@@ -10,7 +10,13 @@ cd "$(dirname "$0")/.."
 ROOT=$(pwd)
 APP="$ROOT/build/Portkeeper.app"
 PKG="$ROOT/macos/Portkeeper"
-VERSION=0.1.0
+# The version comes in from `make dist VERSION=<tag>` (a v* tag in CI) and defaults to a
+# dev marker. CFBundleShortVersionString and CFBundleVersion want dotted numerics, so the
+# leading "v" is dropped and anything that is not a version number reports 0.0.0; the zip
+# name still carries the raw string.
+VERSION="${VERSION:-dev}"
+SHORT="${VERSION#v}"
+[[ "$SHORT" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]] || SHORT="0.0.0"
 
 # XCTest and xcodebuild live in Xcode, not the Command Line Tools. If xcode-select still
 # points at the CLT, use Xcode for this build without changing the machine's setting.
@@ -61,7 +67,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>$VERSION</string>
+	<string>$SHORT</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>CFBundleInfoDictionaryVersion</key>
