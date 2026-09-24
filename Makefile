@@ -73,7 +73,7 @@ clean:
 APP_BUNDLE   := build/Portkeeper.app
 APP_DEST     := $(HOME)/Applications/Portkeeper.app
 
-.PHONY: app app-install
+.PHONY: app app-install dist
 
 app:
 	macos/build-app.sh
@@ -88,3 +88,13 @@ app-install: app
 	@echo "unloaded the dev agent $(LABEL), if it was loaded."
 	@echo "next: open $(APP_DEST), then Settings > Background helper > Register"
 	@echo "      (and approve it in System Settings > Login Items if asked)."
+
+# A downloadable zip of the app. `ditto` keeps the bundle's signature and resource
+# metadata intact where `zip -r` would not. VERSION is passed in (a tag in CI); it never
+# comes from `git describe`, which has nothing to describe on a shallow checkout.
+VERSION ?= dev
+dist: app
+	@mkdir -p dist
+	rm -f dist/Portkeeper-$(VERSION)-macos-arm64.zip
+	ditto -c -k --sequesterRsrc --keepParent build/Portkeeper.app dist/Portkeeper-$(VERSION)-macos-arm64.zip
+	@ls -la dist/Portkeeper-$(VERSION)-macos-arm64.zip

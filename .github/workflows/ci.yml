@@ -1,0 +1,35 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    # Pinned rather than macos-latest: the deployment target is macOS 14, and the runner's
+    # SDK is what proves the app compiles for it. Apple Silicon runner, so the artifact is arm64.
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: go
+        run: |
+          test -z "$(gofmt -l ./cmd)" || { gofmt -l ./cmd; exit 1; }
+          go vet ./...
+          go test -race -count=1 ./...
+          make check
+      - name: swift
+        working-directory: macos/Portkeeper
+        run: |
+          swift build -c release
+          swift test
+      - name: app bundle
+        run: make dist VERSION=ci-${GITHUB_SHA::7}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Portkeeper-macos-arm64
+          path: dist/*.zip
+          retention-days: 30

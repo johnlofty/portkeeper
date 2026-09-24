@@ -6,3 +6,6 @@ bin/portkeeperd
 
 # The assembled .app bundle from `make app`; rebuilt from source.
 build/
+
+# Zips from `make dist`.
+dist/
