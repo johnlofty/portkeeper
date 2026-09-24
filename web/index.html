@@ -1272,6 +1272,10 @@
   // worked and a test that failed leaves the sheet open, and the next Save must update
   // that host rather than try to add it a second time.
   var hostMode = "add", hostAlias = "", hostOpener = null;
+  // hostCreated is set when this sheet added a host that has not yet connected. Cancel
+  // then takes it out again, since Cancel means "I did not add this"; Keep anyway is the
+  // way to leave it.
+  var hostCreated = "";
 
   function fieldErr(name, message) {
     var input = hf[name], node = document.getElementById("h-" + name + "-err");
@@ -1348,6 +1352,7 @@
   function openHostSheet(mode, alias, opener) {
     hostMode = mode;
     hostAlias = alias || "";
+    hostCreated = "";
     hostOpener = opener || document.activeElement;
     clearHostErrs();
     var h = (mode === "edit" && bookEntry(alias)) || {};
@@ -1384,9 +1389,22 @@
     if (o && document.contains(o) && typeof o.focus === "function") o.focus();
   }
 
-  hsheet.addEventListener("cancel", function (ev) { ev.preventDefault(); closeHostSheet(); });
-  document.getElementById("host-cancel").addEventListener("click", closeHostSheet);
-  hostKeep.addEventListener("click", closeHostSheet);
+  function cancelHostSheet() {
+    var gone = hostCreated;
+    hostCreated = "";
+    closeHostSheet();
+    if (!gone) return;
+    api("DELETE", API + "/hosts/" + encodeURIComponent(gone)).then(function () {
+      if (selected === gone) { selected = ""; store(""); }
+      flash("added", "Discarded " + gone + ".");
+    }).catch(function (err) {
+      flash("error", msgOf(err, "Could not take " + gone + " out again; remove it from its page."));
+    }).then(loadHosts);
+  }
+
+  hsheet.addEventListener("cancel", function (ev) { ev.preventDefault(); cancelHostSheet(); });
+  document.getElementById("host-cancel").addEventListener("click", cancelHostSheet);
+  hostKeep.addEventListener("click", function () { hostCreated = ""; closeHostSheet(); });
   addHostBtn.addEventListener("click", function () { openHostSheet("add", "", addHostBtn); });
   hostEdit.addEventListener("click", function () {
     if (selected) openHostSheet("edit", selected, hostEdit);
@@ -1424,7 +1442,9 @@
 
     hostSubmit.disabled = true;
     hostSubmit.textContent = "Saving…";
+    var adding = hostMode === "add";
     save.then(function () {
+      if (adding) hostCreated = alias;
       hostMode = "edit";
       hostAlias = alias;
       hf.alias.disabled = true;
@@ -1436,13 +1456,15 @@
       hostSubmit.textContent = "Connecting…";
       return api("POST", API + "/hosts/" + encodeURIComponent(alias) + "/test").then(function (res) {
         if (res && res.ok) {
+          hostCreated = "";
           closeHostSheet();
           flash("added", "Saved " + alias + " and connected." +
             (res.fingerprint ? " Host key " + res.fingerprint + "." : ""));
           return;
         }
         showTest("fail", "Saved, but could not connect: " + ((res && res.error) || "ssh gave no reason") +
-          ". Change the settings and save again, or keep it as it is.");
+          ". Change the settings and save again, or keep it as it is." +
+          (hostCreated ? " Cancel discards it." : ""));
         hostKeep.classList.remove("hidden");
       });
     }).catch(function (err) {
@@ -1532,6 +1554,8 @@
     } else if (h.source === "eager") {
       note = "Set in the daemon's LG_HOSTS, and connected at startup.";
     }
+    // An incomplete host has nowhere to connect to, so nothing that would connect is offered.
+    addOpenBtn.disabled = emptyAdd.disabled = emptyDisc.disabled = !!h.incomplete;
     hostNote.textContent = note;
     hostNote.classList.toggle("warn", warn);
     hostNote.classList.toggle("hidden", !note);
@@ -2218,7 +2242,7 @@
     probeHost.textContent = alias;
     var c = probeCache[alias];
     var busy = probing === alias;
-    probeRun.disabled = !!probing;
+    probeRun.disabled = !!probing || !!(bookEntry(alias) || {}).incomplete;
     probeRunT.textContent = busy ? "Looking" : (c ? "Refresh" : "Discover");
 
     if (busy) probeNote.textContent = "asking " + alias;

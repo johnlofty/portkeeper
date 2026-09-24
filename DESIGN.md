@@ -1346,6 +1346,13 @@ temp directory. It added a copy of `code` under a new alias, and the connection 
 returned `ok` and the host key fingerprint. Discover listed its listeners, a local-forward
 of :3000 answered on the Mac, Remove was refused with the mapping open, and an edit
 restarted the master with the mapping coming back `alive`. `~/.ssh/config` and
-`~/.ssh/known_hosts` had the same SHA-1 before and after. Not verified: a first connection
-to a host whose key is in neither known_hosts file, which is the case that writes to
-portkeeper's own file; the Pi used for it was unreachable at the time.
+`~/.ssh/known_hosts` had the same SHA-1 before and after. The case that writes to
+portkeeper's own file, a first connection to a key in neither known_hosts, was checked
+separately: `ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new` with an empty
+first `UserKnownHostsFile` exited 0 and added exactly one line to it, and
+`~/.ssh/known_hosts` stayed byte-identical. BatchMode stops ssh asking, not
+`accept-new` recording.
+
+Cancel after a failed first test discards the host, because Cancel means "I did not add
+this"; Keep anyway leaves it. `LG_HOSTS_FILE` set to the old default path turns
+migration off, since migrating the file onto itself would overwrite hosts.conf.

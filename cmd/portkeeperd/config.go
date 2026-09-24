@@ -81,6 +81,11 @@ func loadConfig() (*Config, error) {
 	// The old alias list lived beside the new file, so a daemon pointed at other files
 	// (a test, a second instance) never migrates the real one.
 	c.LegacyHostsFile = filepath.Join(filepath.Dir(c.HostsFile), "hosts")
+	if c.LegacyHostsFile == c.HostsFile {
+		// LG_HOSTS_FILE set to the old default: migrating that file onto itself would
+		// write hosts.conf and then overwrite it with the leftover aliases.
+		c.LegacyHostsFile = ""
+	}
 
 	// No eager hosts is a fine configuration, and the one a downloaded copy starts with:
 	// every Host in ssh_config is offered and dialled on first use, and a pin brings its

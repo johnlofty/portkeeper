@@ -390,3 +390,30 @@ func TestListIdentitiesNamesKeysOnly(t *testing.T) {
 		t.Fatalf("listIdentities = %v, want %v", got, want)
 	}
 }
+
+// LG_HOSTS_FILE pointed at the old default must not migrate the file onto itself: that
+// would write hosts.conf and then overwrite it with the leftover aliases.
+func TestHostsFileAtTheOldPathIsNotMigratedOntoItself(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("LG_HOSTS_FILE", filepath.Join(dir, "hosts"))
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.LegacyHostsFile != "" {
+		t.Fatalf("legacy file = %q, want none when it is the hosts file", cfg.LegacyHostsFile)
+	}
+
+	book := newHostBook(cfg, filepath.Join(dir, "none"), cfg.HostsFile)
+	if err := book.Add(hostEntry{Alias: "box2", HostName: "10.0.0.2"}); err != nil {
+		t.Fatal(err)
+	}
+	book.importLegacy(cfg.HostsFile) // a caller getting it wrong anyway
+	if err := book.Update("box2", hostEntry{HostName: "10.0.0.3"}); err != nil {
+		t.Fatal(err)
+	}
+	if !newHostBook(cfg, filepath.Join(dir, "none"), cfg.HostsFile).Known("box2") {
+		t.Fatal("the host was lost: the hosts file was overwritten by a migration")
+	}
+}

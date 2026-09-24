@@ -346,8 +346,18 @@ func newHostBook(cfg *Config, sshConfig, file string) *hostBook {
 // it was ever stored here. Any other alias is kept as incomplete, since the old console
 // accepted it without asking where it was. It returns how many are incomplete.
 func (b *hostBook) importLegacy(path string) int {
+	if path == "" || path == b.file {
+		return 0
+	}
 	aliases := readLines(path)
 	if len(aliases) == 0 {
+		// An empty old file (the old console wrote one after its last removal) is
+		// still settled by the first save.
+		if _, err := os.Stat(path); err == nil {
+			b.mu.Lock()
+			b.legacy = path
+			b.mu.Unlock()
+		}
 		return 0
 	}
 	elsewhere := map[string]bool{}
