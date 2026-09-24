@@ -24,8 +24,7 @@ as `Host` entries in `~/.ssh/config`, and `ssh <alias>` has to connect without a
 prompt, from keys or an agent. Portkeeper never edits that file.
 
 1. **Download** the latest `Portkeeper-<version>-macos-arm64.zip` from the
-   [Releases page](https://github.com/johnlofty/portkeeper/releases). The repository is
-   private for now, so the page is only reachable by its collaborators.
+   [Releases page](https://github.com/johnlofty/portkeeper/releases).
 2. **Move `Portkeeper.app` to `/Applications`** and open it from there. Do this before the
    next step: registering the background helper records where the app is, and a copy
    registered from `~/Downloads` breaks the moment it moves.
