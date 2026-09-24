@@ -3,3 +3,6 @@ bin/portkeeperd
 
 # Nothing reads a password any more; this stays so an old admin-password copy is never committed.
 *.password
+
+# The assembled .app bundle from `make app`; rebuilt from source.
+build/

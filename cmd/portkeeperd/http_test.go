@@ -376,3 +376,21 @@ func TestRequireLoopbackListen(t *testing.T) {
 }
 
 func itoa(i int) string { return strconv.Itoa(i) }
+
+func TestStatusCarriesAPIVersion(t *testing.T) {
+	h, _, _ := testServer(t)
+	w := do(t, h, "GET", "/admin/status", "")
+	if w.Code != 200 {
+		t.Fatalf("code %d: %s", w.Code, w.Body)
+	}
+	var got struct {
+		APIVersion *int `json:"api_version"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	// The menu-bar app keys its compatibility check on this; it must be present and 1.
+	if got.APIVersion == nil || *got.APIVersion != 1 {
+		t.Fatalf("api_version = %v, want 1: %s", got.APIVersion, w.Body)
+	}
+}

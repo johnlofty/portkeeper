@@ -189,7 +189,12 @@ func (s *server) root(w http.ResponseWriter, r *http.Request) {
 // status reports what the daemon is doing.
 func (s *server) status(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"listen": s.cfg.Listen,
+		// api_version is for clients other than the console, which ships with the daemon
+		// and so can never be out of step with it. The menu-bar app is built separately
+		// and reads this to tell "old daemon" from "daemon is broken". Bump it when a
+		// field a client reads changes meaning or goes away; adding one does not.
+		"api_version": 1,
+		"listen":      s.cfg.Listen,
 		// `hosts` is now the per-host connection state, keyed by alias; the flat list of
 		// configured names it used to be moved to `eager_hosts`. What an operator wants
 		// from this route is "is the link to that box up, and when does it try again",

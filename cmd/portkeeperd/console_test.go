@@ -88,3 +88,30 @@ func TestConsoleCarriesTheNewControls(t *testing.T) {
 		}
 	}
 }
+
+// The console's vocabulary is the design's: mappings are added, forwarded and kept across
+// restarts. The retired words must not creep back, and neither may any trace of the login
+// the daemon no longer has.
+func TestConsoleVocabulary(t *testing.T) {
+	h, _, _ := testServer(t)
+	body := do(t, h, "GET", "/", "").Body.String()
+
+	for _, gone := range []string{"Patch", "password", "login", "credentials", "expose"} {
+		if strings.Contains(body, gone) {
+			t.Errorf("the console still says %q", gone)
+		}
+	}
+	for _, want := range []string{
+		"Add mapping",
+		"Forward",
+		"already mapped",
+		"Keep across restarts",
+		"The arrow points where the port appears",
+		`"#add"`,                               // a native app links straight to the add sheet
+		`"Content-Type"] = "application/json"`, // every write declares JSON
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the console does not carry %s", want)
+		}
+	}
+}

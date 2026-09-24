@@ -3,43 +3,64 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>portkeeper</title>
+<title>Portkeeper</title>
+<!-- One request for the port face. The daemon runs on a laptop that is often offline,
+     so everything below is laid out to read correctly on the fallback stack too. -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;display=swap">
 <style>
-  /* Catppuccin Latte / Mocha — the palette this machine's terminal already runs. */
   :root {
-    --body:    #eff1f5;
-    --panel:   #e6e9ef;
-    --sunken:  #dce0e8;
-    --rail:    #bcc0cc;
-    --edge:    #ccd0da;
-    --ink:     #4c4f69;
-    --dim:     #6c6f85;
-    --faint:   #8c8fa1;
-    --local:   #179299;
-    --remote:  #fe640b;
-    --dead:    #d20f39;
-    --warn:    #df8e1d;
-    --label:   #8839ef;
-    --focus:   #1e66f5;
-    --shade:   rgba(76, 79, 105, .07);
+    color-scheme: light dark;
+
+    --window:     #F2F2F0;
+    --surface:    #FFFFFF;
+    --hair:       #DCDCD8;
+    --selected:   #E3E3DF;
+    --ink:        #1D1D1B;
+    --ink2:       #575753;
+    --caption:    #6A6A66;
+    --accent:     #0B6E6B;
+    --on-accent:  #FFFFFF;
+    --live:       #12A594;
+    --amber:      #8A5700;
+    --amber-dot:  #E39A1D;
+    --hollow:     #B8B8B2;
+    --chip:       #F5F5F2;
+    --chip-line:  #D9D9D4;
+    --ghost-line: #CFCFCA;
+    --input-bg:   #FFFFFF;
+    --input-line: #C9C9C4;
+    --seg-on:     #FFFFFF;
+    --switch-off: #D6D6D1;
+    --knob:       #FFFFFF;
+    --scrim:      rgba(29, 29, 27, .28);
+
+    --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --body:    #1e1e2e;
-      --panel:   #181825;
-      --sunken:  #11111b;
-      --rail:    #45475a;
-      --edge:    #313244;
-      --ink:     #cdd6f4;
-      --dim:     #a6adc8;
-      --faint:   #6c7086;
-      --local:   #94e2d5;
-      --remote:  #fab387;
-      --dead:    #f38ba8;
-      --warn:    #f9e2af;
-      --label:   #cba6f7;
-      --focus:   #89b4fa;
-      --shade:   rgba(0, 0, 0, .25);
+      --window:     #1F1F1D;
+      --surface:    #171716;
+      --hair:       #34342F;
+      --selected:   #2C2C29;
+      --ink:        #EDEDE8;
+      --ink2:       #B4B4AD;
+      --caption:    #9C9C95;
+      --accent:     #3FBDB3;
+      --on-accent:  #0E1F1D;
+      --live:       #3FBDB3;
+      --amber:      #E0A33A;
+      --amber-dot:  #E0A33A;
+      --hollow:     #5C5C56;
+      --chip:       #232321;
+      --chip-line:  #3A3A35;
+      --ghost-line: #45453F;
+      --input-bg:   #1C1C1A;
+      --input-line: #45453F;
+      --seg-on:     #45453F;
+      --switch-off: #45453F;
+      --knob:       #EDEDE8;
+      --scrim:      rgba(0, 0, 0, .5);
     }
   }
 
@@ -48,767 +69,654 @@
 
   body {
     margin: 0;
-    padding: 28px 20px 48px;
-    background: var(--body);
+    background: var(--surface);
     color: var(--ink);
-    font: 12.5px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    font: 13px/1.4 var(--sans);
     font-synthesis: none;
     -webkit-font-smoothing: antialiased;
   }
 
-  main { max-width: 620px; margin: 0 auto; }
+  a { color: var(--accent); }
+  a:hover { color: var(--ink); }
 
-  /* Machine truth is monospace throughout; the sans face is reserved for prose,
-     so the two voices stay legibly distinct. */
-  .m {
-    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-    font-variant-numeric: tabular-nums;
+  /* Mono is for port numbers and host aliases, and nothing else. */
+  .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+  .hidden { display: none !important; }
+  .grow { flex-grow: 1; }
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
   }
 
-  /* ---- header -------------------------------------------------------- */
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-  header {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 14px;
-    flex-wrap: wrap;
-    margin-bottom: 18px;
+  svg.ico { display: block; flex: none; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* ---- dots --------------------------------------------------------- */
+
+  .dot {
+    display: inline-block; flex: none;
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--live);
   }
+  .dot.sm { width: 6px; height: 6px; }
+  .dot[data-state="retry"] { background: var(--amber-dot); }
+  .dot[data-state="off"]   { background: transparent; border: 1.5px solid var(--hollow); }
 
-  h1 {
-    margin: 0;
-    font: 600 17px/1.2 ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-    letter-spacing: -0.02em;
-  }
+  /* ---- buttons ------------------------------------------------------ */
 
-  .head-right { display: flex; align-items: center; gap: 14px; }
-
-  #summary {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    font-size: 11.5px;
-    color: var(--dim);
-    white-space: nowrap;
-  }
-  #link-dot {
-    width: 6px; height: 6px;
-    border-radius: 50%;
-    background: var(--local);
-    flex: none;
-  }
-  #summary[data-link="down"] { color: var(--dead); }
-  #summary[data-link="down"] #link-dot { background: var(--dead); }
-
-  .linkbtn {
-    padding: 3px 7px;
-    border: 1px solid transparent;
-    border-radius: 4px;
-    background: transparent;
-    color: var(--faint);
-    font: 11px/1.4 ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-    cursor: pointer;
-  }
-  .linkbtn:hover { color: var(--ink); border-color: var(--edge); }
-  .linkbtn:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-
-  /* ---- the bay ------------------------------------------------------- */
-
-  /* A recessed equipment face. The two rails are the machines: everything that
-     happens happens between them. */
-  /* The rails sit OUTSIDE the content column, never through it: content is inset by
-     --stub, and only the cable line reaches back across that gap to meet a rail. */
-  .bay {
-    --stub: 14px;
-    position: relative;
-    padding: 0 32px;
-    background: var(--panel);
-    border: 1px solid var(--edge);
-    border-radius: 9px;
-    box-shadow: inset 0 1px 0 var(--shade);
-  }
-
-  .bay::before, .bay::after {
-    content: "";
-    position: absolute;
-    top: 30px; bottom: 0;
-    width: 1px;
-    background: var(--rail);
-  }
-  .bay::before { left: 18px; }
-  .bay::after  { right: 18px; }
-
-  /* rail caps — which machine each rail is */
-  .caps {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 11px 0 5px;
-    font: 11px/1.4 ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-    color: var(--faint);
-    letter-spacing: 0.02em;
-  }
-  .cap { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-  #list { list-style: none; margin: 0; padding: 0; }
-
-  /* ---- one cable ----------------------------------------------------- */
-
-  /* No dividers between rows: a rule spanning the bay would cut both rails, and
-     the rails are the structure here. Spacing separates the cables instead. */
-  .cable { position: relative; padding: 15px 0 16px; }
-
-  .cable[data-dir="local-forward"]  { --sig: var(--local); }
-  .cable[data-dir="remote-forward"] { --sig: var(--remote); }
-  .cable[data-state="dead"]         { --sig: var(--dead); }
-
-  /* Only the cable reaches out past the content column to touch both rails. */
-  .line {
-    position: relative;
-    display: flex;
-    align-items: center;
-    min-height: 22px;
-    margin: 0 calc(var(--stub) * -1);
-  }
-
-  /* the run itself: a slack line rail-to-rail, overprinted by the endpoints.
-     Fainter than the rails so the two machines stay the dominant structure. */
-  .line::before {
-    content: "";
-    position: absolute;
-    left: 0; right: 0; top: 50%;
-    height: 1px;
-    background: var(--edge);
-  }
-
-  /* the lit portion is the lease still remaining, anchored at the origin rail,
-     so a mapping visibly retracts toward its source as it expires */
-  .gauge {
-    position: absolute;
-    top: 50%;
-    height: 1px;
-    background: var(--sig);
-    transform-origin: left center;
-  }
-  .cable[data-dir="remote-forward"] .gauge { transform-origin: right center; }
-  .cable[data-state="dead"] .gauge { background: transparent; }
-
-  .port {
-    position: relative;
-    background: var(--panel);
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    border-radius: 6px;
+    font: 500 13px/1.3 var(--sans);
     color: var(--ink);
-    font: 500 14px/1.2 ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-    font-variant-numeric: tabular-nums;
-    letter-spacing: -0.01em;
+    cursor: pointer;
     text-decoration: none;
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    min-width: 0;
   }
-  /* margin clears the rail, padding knocks the run line out from behind the text */
-  .port.l { margin-left: var(--stub); padding-right: 9px; }
-  .port.r { margin-right: var(--stub); padding-left: 9px; }
-
-  a.port[href] { cursor: pointer; }
-  a.port[href]:hover { color: var(--sig); }
-  a.port:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
-
-  .spacer { flex: 1 1 8px; min-width: 6px; }
-
-  /* arrowhead — the only thing that says which way traffic flows */
-  .head {
-    position: relative;
-    flex: none;
-    width: 11px; height: 12px;
-    background: var(--panel);
-    color: var(--sig);
+  .btn.primary {
+    padding: 7px 14px;
+    border: 1px solid var(--accent);
+    background: var(--accent);
+    color: var(--on-accent);
+    font-weight: 600;
   }
-  .head::after {
-    content: "";
-    position: absolute;
-    top: 50%; left: 50%;
-    width: 0; height: 0;
-    border: 4px solid transparent;
-    transform: translate(-50%, -50%);
-  }
-  .cable[data-dir="local-forward"]  .head::after { border-left-color: currentcolor;  margin-left: 2px; }
-  .cable[data-dir="remote-forward"] .head::after { border-right-color: currentcolor; margin-left: -2px; }
-
-  /* order puts the head against the destination endpoint */
-  .port.l  { order: 1; }
-  .cable[data-dir="local-forward"]  .spacer { order: 2; }
-  .cable[data-dir="local-forward"]  .head   { order: 3; }
-  .cable[data-dir="remote-forward"] .head   { order: 2; }
-  .cable[data-dir="remote-forward"] .spacer { order: 3; }
-  .port.r  { order: 4; }
-
-  .cable[data-state="dead"] .port {
-    color: var(--faint);
-    text-decoration: line-through;
-    text-decoration-thickness: 1px;
-  }
-
-  /* Controls live on the meta line, not the cable: a run that stops short of its
-     rail to make room for buttons stops reading as a connection. */
-  .rowbtns {
-    flex: none;
-    display: flex;
-    gap: 2px;
-    margin-left: 4px;
-  }
-
-  .rowbtn {
-    width: 21px; height: 21px;
-    /* negative block margin keeps the tap target off the meta line's rhythm */
-    margin: -3px 0;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    margin: 0;
-    padding: 0;
-    border: 0;
-    border-radius: 4px;
+  .btn.primary:hover { filter: brightness(1.08); color: var(--on-accent); }
+  .btn.ghost {
+    padding: 6px 12px;
+    border: 1px solid var(--ghost-line);
     background: transparent;
-    color: var(--faint);
-    font: 15px/1 -apple-system, system-ui, sans-serif;
-    cursor: pointer;
   }
-  .rowbtn svg { display: block; flex: none; }
-  .rowbtn:hover { background: var(--sunken); color: var(--ink); }
-  .rowbtn.pull:hover { color: var(--dead); }
-  .rowbtn:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+  .btn.ghost:hover { background: var(--selected); }
+  .btn.small { padding: 4px 10px; font-size: 12px; }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .btn.primary:disabled:hover { filter: none; }
+  .btn.ghost:disabled:hover { background: transparent; }
 
-  /* ---- meta ---------------------------------------------------------- */
-
-  .meta {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    margin-top: 7px;
-    font-size: 11.5px;
-    color: var(--dim);
-    min-height: 19px;
-  }
-
-  .who { display: flex; align-items: baseline; gap: 9px; min-width: 0; }
-  .tail { display: flex; align-items: center; gap: 10px; flex: none; }
-
-  .dir {
-    flex: none;
-    font: 10.5px/1.4 ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-    color: var(--sig);
-    opacity: .85;
-  }
-  .cable[data-state="dead"] .dir { color: var(--dead); }
-
-  .tag {
-    color: var(--label);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .times {
-    flex: none;
-    display: flex;
-    gap: 11px;
-    font: 11px/1.4 ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-    font-variant-numeric: tabular-nums;
-  }
-  .age    { color: var(--faint); }
-  .expiry { color: var(--dim); }
-  .expiry[data-soon="1"] { color: var(--warn); }
-  .cable[data-state="dead"] .tag,
-  .cable[data-state="dead"] .expiry { color: var(--faint); }
-
-  /* ---- motion -------------------------------------------------------- */
-
-  @keyframes patch { from { transform: scaleX(0); } to { transform: scaleX(1); } }
-  @keyframes arrive { from { opacity: 0; } to { opacity: 1; } }
-
-  @media (prefers-reduced-motion: no-preference) {
-    .cable.enter .gauge { animation: patch .34s cubic-bezier(.2,.7,.3,1) both; }
-    .cable.enter .port, .cable.enter .head, .cable.enter .meta {
-      animation: arrive .34s ease-out both;
-    }
-    .cable.pulling { opacity: .4; transition: opacity .18s ease-out; }
-    .cable.pulling .gauge { transform: scaleX(0); transition: transform .22s ease-in; }
-  }
-
-  /* ---- foot / patch button ------------------------------------------- */
-
-  .foot {
-    position: relative;
-    display: flex;
-    padding: 10px 0 12px;
-    border-top: 1px solid var(--edge);
-  }
-  .patch {
-    position: relative;
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    margin: 0 auto;
-    padding: 5px 13px;
-    border: 1px solid var(--edge);
-    border-radius: 5px;
-    background: var(--panel);
-    color: var(--dim);
-    font: 12px/1.3 -apple-system, system-ui, sans-serif;
-    cursor: pointer;
-  }
-  .patch:hover { color: var(--ink); border-color: var(--rail); }
-  .patch:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-  .patch .plus {
-    font: 14px/1 ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-    color: var(--faint);
-  }
-  .patch[aria-expanded="true"] { background: var(--sunken); color: var(--ink); }
-
-  /* ---- notices ------------------------------------------------------- */
-
-  .bay-note {
-    position: relative;
-    padding: 26px 4px 28px;
-    max-width: 44ch;
-  }
-  .bay-note p { margin: 0 0 6px; }
-  .bay-note p:last-child { margin-bottom: 0; color: var(--dim); }
-  .bay-note.down p:first-child { color: var(--dead); }
-
-  code {
-    font: 11.5px/1.4 ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-    background: var(--sunken);
-    border: 1px solid var(--edge);
-    border-radius: 3px;
-    padding: 1px 5px;
-    color: var(--ink);
-  }
-
-  /* ---- forms --------------------------------------------------------- */
-
-  .form {
-    position: relative;
-    padding: 14px 0 15px;
-    border-top: 1px solid var(--edge);
-  }
-
-  .seg {
-    display: inline-flex;
-    border: 1px solid var(--edge);
-    border-radius: 5px;
-    overflow: hidden;
-    background: var(--sunken);
-  }
-  .seg label { position: relative; display: block; }
-  .seg input {
-    position: absolute;
-    inset: 0;
-    width: 100%; height: 100%;
-    margin: 0;
-    opacity: 0;
-    cursor: pointer;
-  }
-  .seg span {
-    display: block;
-    padding: 5px 11px;
-    font: 11.5px/1.4 ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-    color: var(--dim);
-    cursor: pointer;
-    white-space: nowrap;
-  }
-  .seg input:checked + span { background: var(--panel); color: var(--ink); }
-  .seg label:first-child input:checked + span { box-shadow: inset 0 -2px 0 var(--local); }
-  .seg label:last-child  input:checked + span { box-shadow: inset 0 -2px 0 var(--remote); }
-  .seg input:focus-visible + span { outline: 2px solid var(--focus); outline-offset: -2px; }
-
-  .hint {
-    margin: 10px 0 0;
-    max-width: 50ch;
-    font-size: 12px;
-    color: var(--dim);
-  }
-
-  .fields {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: flex-end;
-    gap: 9px 10px;
-    margin-top: 12px;
-  }
-
-  .f { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-  .f > span { font-size: 10.5px; color: var(--faint); }
-  .f > span em { font-style: normal; color: var(--rail); }
-
-  input[type="text"] {
-    padding: 5px 8px;
-    border: 1px solid var(--edge);
-    border-radius: 4px;
-    background: var(--body);
-    color: var(--ink);
-    font: 12.5px/1.4 ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-    font-variant-numeric: tabular-nums;
-  }
-  input[type="text"]:focus-visible {
-    outline: 2px solid var(--focus);
-    outline-offset: -1px;
-    border-color: var(--focus);
-  }
-  input::placeholder { color: var(--rail); }
-
-  .f-host  select { width: auto; max-width: 16ch; }
-
-  select {
-    padding: 5px 8px;
-    border: 1px solid var(--edge);
-    border-radius: 4px;
-    background: var(--body);
-    color: var(--ink);
-    font: 12.5px/1.4 ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-    cursor: pointer;
-  }
-  select:focus-visible { outline: 2px solid var(--focus); outline-offset: -1px; border-color: var(--focus); }
-
-  /* The picked host's real hostname, which the option itself is too narrow to carry. */
-  .hostnote {
-    margin: 9px 0 0;
-    font-size: 11.5px;
-    color: var(--dim);
-  }
-
-  .addhost { display: flex; align-items: flex-end; gap: 8px; margin-top: 11px; }
-  .addhost input { width: 14ch; }
-  .f-port   input { width: 9ch; }
-  .f-label  input { width: 12ch; }
-  .f-ttl    input { width: 8ch; }
-  .f-target input { width: 11ch; }
-
-  /* field order mirrors the bay: the machine the service lives on comes first, and the
-     target host sits immediately after the remote port because the two together name
-     one endpoint on the far side. */
-  .f-host   { order: 1; }
-  .f-remote { order: 2; }
-  .f-target { order: 3; }
-  .f-local  { order: 4; }
-  .f-label  { order: 5; }
-  .f-ttl    { order: 6; }
-  .form[data-dir="remote-forward"] .f-local  { order: 2; }
-  .form[data-dir="remote-forward"] .f-remote { order: 3; }
-
-  .check {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    margin-top: 11px;
-    font-size: 12px;
-    color: var(--dim);
-    cursor: pointer;
-  }
-  .check input { margin: 0; cursor: pointer; }
-  .check.off { color: var(--rail); cursor: default; }
-  .check.off input { cursor: default; }
-
-  .actions { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
-
-  button.primary, button.ghost {
-    padding: 5px 13px;
-    border-radius: 4px;
-    font: 12px/1.4 -apple-system, system-ui, sans-serif;
-    cursor: pointer;
-  }
-  button.primary {
-    border: 1px solid var(--local);
-    background: var(--local);
-    color: var(--panel);
-    font-weight: 500;
-  }
-  button.primary:hover { filter: brightness(1.06); }
-  button.ghost {
-    border: 1px solid var(--edge);
-    background: transparent;
-    color: var(--dim);
-  }
-  button.ghost:hover { color: var(--ink); border-color: var(--rail); }
-  button.primary:focus-visible, button.ghost:focus-visible {
-    outline: 2px solid var(--focus); outline-offset: 2px;
-  }
-
-  .err {
-    margin: 11px 0 0;
-    padding: 6px 10px;
-    border-left: 2px solid var(--dead);
-    background: var(--sunken);
-    border-radius: 0 3px 3px 0;
-    font-size: 12px;
-    color: var(--dead);
-    max-width: 50ch;
-  }
-
-  /* inline edit. Deliberately not `.edit`: the row button carries that class and
-     a bare rule would paint this panel's border onto the button. */
-  .edit-panel {
-    position: relative;
-    margin: 11px 0 1px;
-    padding: 11px 12px;
-    background: var(--sunken);
-    border: 1px solid var(--edge);
+  .iconbtn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 30px; height: 30px; padding: 0;
     border-radius: 6px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--ink2);
+    cursor: pointer;
+    text-decoration: none;
   }
-  .edit-panel .fields { margin-top: 0; }
-  .edit-panel .actions { margin-top: 12px; }
+  .iconbtn:hover { background: var(--selected); color: var(--ink); }
+  .iconbtn.line { border-color: var(--ghost-line); color: var(--ink); }
+  .iconbtn[aria-expanded="true"] { background: var(--selected); color: var(--ink); }
+  .iconspacer { display: inline-block; width: 30px; height: 30px; }
 
-  /* ---- flash --------------------------------------------------------- */
+  /* ---- top bar ------------------------------------------------------ */
+
+  .top {
+    position: sticky; top: 0; z-index: 5;
+    display: flex; align-items: center; gap: 12px;
+    height: 52px; padding: 0 20px;
+    background: var(--window);
+    border-bottom: 1px solid var(--hair);
+  }
+  .top .mark { display: inline-flex; color: var(--ink); }
+  .top .app { font: 600 15px var(--sans); letter-spacing: -0.01em; }
+  .top-status { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+  .top-status span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .top-count { color: var(--caption); margin-left: 8px; white-space: nowrap; }
+
+  /* ---- shell -------------------------------------------------------- */
+
+  .shell { display: flex; min-height: calc(100vh - 52px); }
+
+  .side {
+    position: sticky; top: 52px;
+    flex: none;
+    width: 232px;
+    height: calc(100vh - 52px);
+    overflow-y: auto;
+    display: flex; flex-direction: column; gap: 2px;
+    padding: 14px 12px;
+    background: var(--window);
+    border-right: 1px solid var(--hair);
+  }
+  .side-title { font-size: 12px; color: var(--caption); padding: 0 10px 6px; }
+
+  .host-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+  .host {
+    display: flex; flex-direction: column; gap: 3px;
+    width: 100%;
+    padding: 8px 10px;
+    border: 0; border-radius: 6px;
+    background: transparent;
+    color: var(--ink);
+    text-align: left;
+    font: inherit;
+    cursor: pointer;
+  }
+  .host:hover { background: var(--selected); }
+  .host[aria-current="true"] { background: var(--selected); }
+  .host-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .host-top .mono { font-weight: 500; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .host-sub { font-size: 12px; color: var(--caption); padding-left: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .host-sub.warn { color: var(--amber); }
+
+  .side-add { padding: 6px 4px 0; }
+  .addhost { display: flex; flex-direction: column; gap: 8px; padding: 8px 6px 0; }
+  .addhost label { font: 500 12px var(--sans); }
+  .addhost .row-btns { display: flex; gap: 6px; }
+  .addhost .err { margin: 0; }
+
+  .side-foot { padding: 0 10px; display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--caption); }
+  .side-foot div { overflow-wrap: anywhere; }
+
+  .main {
+    flex-grow: 1; min-width: 0;
+    padding: 26px 32px 48px;
+    display: flex; flex-direction: column; gap: 28px;
+  }
+
+  /* ---- host head ---------------------------------------------------- */
+
+  .host-view { display: flex; flex-direction: column; gap: 14px; }
+  .host-head { display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap; }
+  .host-head .titles { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  h1 {
+    margin: 0;
+    font: 600 28px/1.1 var(--mono);
+    letter-spacing: -0.02em;
+    overflow-wrap: anywhere;
+  }
+  .host-info { font-size: 13px; color: var(--caption); }
+  .host-head .head-btns { display: flex; gap: 8px; margin-left: auto; }
+
+  /* ---- mapping rows ------------------------------------------------- */
+
+  /* The five tracks every mapping lines up on: origin chip, cable, destination chip,
+     what it is, what you can do to it. The cable gives way first when space is short. */
+  .grid5 {
+    display: grid;
+    grid-template-columns: 176px minmax(56px, 300px) 176px minmax(180px, 1fr) auto;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .legend { padding: 6px 0 0; font-size: 12px; color: var(--caption); }
+  .legend > span:nth-child(2) { text-align: center; }
+  .legend > span:nth-child(3) { text-align: right; }
+  .legend .mono { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .rows { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--hair); }
+  .row { padding: 14px 0; border-bottom: 1px solid var(--hair); transition: background-color .4s ease-out, opacity .2s ease-out; }
+  .row:focus { outline: none; }
+  .row.found { background: var(--selected); }
+  .row.closing { opacity: .4; }
+
+  .pchip {
+    min-width: 0;
+    padding: 10px 14px;
+    background: var(--chip);
+    border: 1px solid var(--chip-line);
+    border-radius: 8px;
+  }
+  .pchip.r { text-align: right; }
+  .pnum {
+    font: 600 20px/1 var(--mono);
+    letter-spacing: -0.01em;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .psub { margin-top: 6px; font-size: 12px; color: var(--caption); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .pchip.dashed { background: transparent; border: 1.5px dashed var(--chip-line); }
+  .pchip.dashed .pnum { color: var(--hollow); }
+
+  /* The cable. Drawn once, pointing right; a remote-forward mirrors it, so the
+     arrowhead always lands on the machine where the port appears. */
+  .wire { display: block; width: 100%; height: 24px; overflow: visible; margin-right: 12px; }
+  .wire .w-dot  { fill: var(--ink2); }
+  .wire .w-line { stroke: var(--ink2); stroke-width: 1.5; }
+  .wire .w-head { fill: none; stroke: var(--ink2); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+  [data-dir="remote-forward"] > .wire { transform: scaleX(-1); margin-right: 0; margin-left: 12px; }
+  .wire-cell { display: flex; min-width: 0; }
+  .wire-cell .wire { flex: 1 1 0; width: 100%; min-width: 0; }
+  .wire.dashed .w-dot { display: none; }
+  .wire.dashed .w-line { stroke: var(--chip-line); stroke-dasharray: 4 6; }
+  .wire.dashed .w-head { stroke: var(--chip-line); }
+
+  .row[data-state="reconnecting"] .pnum,
+  .row[data-state="dead"] .pnum { color: var(--ink2); }
+  .row[data-state="dead"] .w-line { stroke-dasharray: 4 6; }
+
+  .info { display: flex; flex-direction: column; gap: 4px; padding-left: 12px; min-width: 0; }
+  .line1 { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .label { font: 500 14px var(--sans); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .label.none { color: var(--ink2); font-weight: 400; }
+  .pin { display: inline-flex; align-items: center; gap: 4px; color: var(--ink2); font-size: 12px; flex: none; }
+  .state { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--caption); min-width: 0; }
+  .state .stext { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .state.warn .stext { color: var(--amber); }
+  .note { font-size: 12px; color: var(--caption); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .acts { display: flex; align-items: center; gap: 6px; }
+
+  @keyframes arrive { from { opacity: 0; } to { opacity: 1; } }
+  @media (prefers-reduced-motion: no-preference) {
+    .row.enter { animation: arrive .3s ease-out both; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .row { transition: none; }
+  }
+
+  /* ---- more menu ---------------------------------------------------- */
+
+  .menu {
+    position: fixed; z-index: 20;
+    min-width: 168px;
+    padding: 4px;
+    background: var(--surface);
+    border: 1px solid var(--ghost-line);
+    border-radius: 8px;
+  }
+  .menu button {
+    display: block; width: 100%;
+    padding: 6px 10px;
+    border: 0; border-radius: 5px;
+    background: transparent;
+    color: var(--ink);
+    font: 13px var(--sans);
+    text-align: left;
+    cursor: pointer;
+  }
+  .menu button:hover, .menu button:focus-visible { background: var(--selected); outline: none; }
+  .menu hr { margin: 4px 6px; border: 0; border-top: 1px solid var(--hair); }
+
+  /* ---- empty state -------------------------------------------------- */
+
+  .empty { display: flex; flex-direction: column; gap: 28px; padding-top: 14px; }
+  .empty-art { display: grid; grid-template-columns: 176px minmax(56px, 300px) 176px; align-items: center; gap: 16px; opacity: .9; }
+  .empty-copy { display: flex; flex-direction: column; gap: 8px; max-width: 520px; }
+  .empty-copy h2 { margin: 0; font: 600 17px var(--sans); }
+  .empty-copy p { margin: 0; line-height: 1.5; color: var(--ink2); }
+  .empty-btns { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+  .notice { display: flex; flex-direction: column; gap: 8px; max-width: 520px; padding-top: 8px; }
+  .notice h2 { margin: 0; font: 600 17px var(--sans); }
+  .notice p { margin: 0; line-height: 1.5; color: var(--ink2); }
+
+  /* ---- flash, errors ------------------------------------------------ */
 
   .flash {
-    margin: 0 0 14px;
-    padding: 8px 11px;
-    border: 1px solid var(--edge);
-    border-left: 2px solid var(--local);
-    border-radius: 4px;
-    background: var(--panel);
-    font-size: 12px;
-    color: var(--dim);
-  }
-  .flash .m { color: var(--ink); }
-  .flash[data-kind="reused"] { border-left-color: var(--warn); }
-  .flash[data-kind="error"]  { border-left-color: var(--dead); color: var(--dead); }
-
-  /* ---- pinned, reconnecting ------------------------------------------ */
-
-  /* A pin is a property of the mapping, not of its health, so it gets its own colour
-     rather than competing with the direction signal on the cable itself. */
-  .pinmark { flex: none; display: inline-flex; color: var(--label); }
-  .pinmark svg { display: block; }
-  .expiry[data-pinned="1"] { color: var(--label); }
-
-  /* Reconnecting is not dead. The row keeps its endpoints readable — nothing has been
-     lost, the link underneath it is being rebuilt — and takes the warning hue that the
-     expiry countdown already uses for "this needs your attention soon". */
-  .cable[data-state="reconnecting"]        { --sig: var(--warn); }
-  .cable[data-state="reconnecting"] .port  { color: var(--dim); }
-  .cable[data-state="reconnecting"] .gauge { background: var(--warn); opacity: .5; }
-
-  .note {
-    flex: none;
-    font: 11px/1.4 ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-    color: var(--warn);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  /* ---- discovery ----------------------------------------------------- */
-
-  .probe { margin-top: 20px; }
-
-  .probe-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    flex-wrap: wrap;
-  }
-  .probe h2 {
     margin: 0;
-    font: 500 11.5px/1.4 -apple-system, system-ui, sans-serif;
-    color: var(--dim);
+    padding: 8px 12px;
+    border: 1px solid var(--hair);
+    border-left: 3px solid var(--live);
+    border-radius: 6px;
+    background: var(--window);
+    color: var(--ink);
   }
-  .probe h2 .m { color: var(--ink); }
-  .probe-tools { display: flex; align-items: center; gap: 7px; }
-  .probe-tools select { padding: 3px 6px; font-size: 11.5px; }
+  .flash[data-kind="reused"] { border-left-color: var(--amber-dot); }
+  .flash[data-kind="error"]  { border-left-color: var(--amber-dot); color: var(--amber); }
 
-  .probe-note { margin: 9px 0 0; font-size: 11.5px; color: var(--dim); max-width: 50ch; }
-  .probe-note.bad { color: var(--dead); }
-
-  table.lst {
-    width: 100%;
-    margin-top: 9px;
-    border-collapse: collapse;
-    font: 11.5px/1.5 ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-    font-variant-numeric: tabular-nums;
+  .err {
+    margin: 0;
+    padding: 6px 10px;
+    border-left: 3px solid var(--amber-dot);
+    background: var(--window);
+    border-radius: 0 6px 6px 0;
+    font-size: 12px;
+    color: var(--amber);
   }
-  table.lst th {
-    text-align: left;
-    padding: 0 9px 5px 0;
-    font: 10.5px/1.4 -apple-system, system-ui, sans-serif;
-    color: var(--faint);
-    font-weight: 400;
-  }
-  table.lst td {
-    padding: 5px 9px 5px 0;
-    border-top: 1px solid var(--edge);
-    vertical-align: baseline;
-  }
-  table.lst td:last-child, table.lst th:last-child { padding-right: 0; text-align: right; }
-  table.lst .addr { color: var(--dim); }
-  table.lst .what { color: var(--ink); overflow: hidden; text-overflow: ellipsis; }
-  table.lst .ctr  { color: var(--label); }
-  table.lst tr[data-forwarded="1"] td { color: var(--faint); }
 
-  .fwdbtn {
-    padding: 2px 9px;
-    border: 1px solid var(--edge);
-    border-radius: 4px;
-    background: transparent;
-    color: var(--dim);
-    font: 11px/1.5 -apple-system, system-ui, sans-serif;
-    cursor: pointer;
+  /* ---- listening ---------------------------------------------------- */
+
+  .probe { display: flex; flex-direction: column; gap: 10px; }
+  .probe-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .probe-head h2 { margin: 0; font: 600 15px var(--sans); }
+  .probe-head h2 .mono { font-weight: 600; }
+  .caption { font-size: 12px; color: var(--caption); }
+  .probe-msg { margin: 0; color: var(--ink2); max-width: 560px; }
+  .probe-msg.bad { color: var(--amber); }
+
+  table.lst { width: 100%; border-collapse: collapse; border-top: 1px solid var(--hair); table-layout: fixed; }
+  table.lst td { padding: 9px 16px 9px 0; border-bottom: 1px solid var(--hair); vertical-align: middle; }
+  table.lst td:last-child { padding-right: 0; text-align: right; }
+  table.lst col.c-port { width: 96px; }
+  table.lst col.c-addr { width: 176px; }
+  table.lst col.c-act  { width: 156px; }
+  .lp { font: 500 15px var(--mono); font-variant-numeric: tabular-nums; }
+  .lw { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .la { font-size: 12px; color: var(--caption); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mapped { font-size: 12px; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+  .mapped:hover { text-decoration: underline; }
+
+  /* ---- the sheet ---------------------------------------------------- */
+
+  dialog.sheet {
+    width: min(560px, calc(100vw - 32px));
+    max-height: calc(100vh - 32px);
+    padding: 0;
+    border: 0;
+    border-radius: 12px;
+    background: var(--surface);
+    color: var(--ink);
+    box-shadow: 0 18px 50px rgba(0,0,0,.28), 0 0 0 .5px rgba(0,0,0,.12);
+    overflow-y: auto;
   }
-  .fwdbtn:hover { color: var(--ink); border-color: var(--rail); }
-  .fwdbtn:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-  .already { font: 11px/1.5 -apple-system, system-ui, sans-serif; color: var(--faint); }
-  .already a { color: var(--local); text-decoration: none; }
-  .already a:hover { text-decoration: underline; }
+  dialog.sheet::backdrop { background: var(--scrim); }
+  /* For a browser without <dialog>: the same sheet, placed by hand. */
+  dialog.sheet.fallback[open] {
+    position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 30;
+  }
 
-  .hidden { display: none; }
+  .sheet form { display: flex; flex-direction: column; gap: 18px; padding: 22px 24px; }
+  .sheet h2 { margin: 0; font: 600 17px var(--sans); }
+  .stack { display: flex; flex-direction: column; gap: 10px; }
+  .dir-hint { color: var(--ink2); }
 
-  @media (max-width: 460px) {
-    body { padding: 22px 14px 32px; }
-    .bay { --stub: 10px; padding: 0 22px; }
-    .bay::before { left: 12px; }
-    .bay::after  { right: 12px; }
-    .port { font-size: 13px; }
-    .port.l { padding-right: 7px; }
-    .port.r { padding-left: 7px; }
-    .rowbtns { margin-left: 4px; }
-    .age { display: none; }
+  fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
+
+  .seg {
+    display: flex; gap: 2px; padding: 2px;
+    background: var(--selected);
+    border-radius: 7px;
+  }
+  .seg label { position: relative; flex: 1 1 0; display: flex; }
+  .seg input {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    margin: 0; opacity: 0; cursor: pointer;
+  }
+  .seg span {
+    flex: 1 1 auto;
+    display: flex; align-items: center; justify-content: center;
+    height: 28px; padding: 0 8px;
+    border-radius: 5px;
+    font: 500 13px var(--sans);
+    color: var(--ink);
+    white-space: nowrap;
+  }
+  .seg input:checked + span { background: var(--seg-on); font-weight: 600; }
+  .seg input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 0; }
+  .seg input:disabled { cursor: default; }
+  .seg input:disabled + span { opacity: .45; }
+
+  .mini { display: grid; grid-template-columns: minmax(0, 160px) minmax(40px, 176px) minmax(0, 160px); align-items: center; gap: 12px; }
+
+  .pair { display: flex; gap: 14px; }
+  .pair > .fld { flex: 1 1 0; min-width: 0; }
+  .fld { display: flex; flex-direction: column; gap: 6px; }
+  .fld > label, .ttl-row > legend { font: 500 13px var(--sans); }
+  .hint { font-size: 12px; color: var(--caption); }
+
+  input[type="text"] {
+    width: 100%; height: 34px; padding: 0 10px;
+    font: 13px var(--sans);
+    color: var(--ink);
+    background: var(--input-bg);
+    border: 1px solid var(--input-line);
+    border-radius: 6px;
+  }
+  input[type="text"].mono { font: 500 14px var(--mono); }
+  input[type="text"]::placeholder { color: var(--caption); opacity: .8; }
+  input[type="text"]:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; border-color: var(--accent); }
+
+  .ttl-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .ttl-row > legend { float: left; width: 120px; padding: 0; }
+  .ttl-row .seg { width: 260px; }
+  .ttl-note { width: 100%; }
+
+  .switches { display: flex; flex-direction: column; gap: 10px; padding-top: 2px; }
+  .switch { position: relative; display: flex; align-items: center; gap: 12px; cursor: pointer; }
+  .switch input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; }
+  .track {
+    position: relative; flex: none;
+    width: 36px; height: 20px; border-radius: 10px;
+    background: var(--switch-off);
+    transition: background-color .15s ease-out;
+  }
+  .track::after {
+    content: ""; position: absolute; top: 2px; left: 2px;
+    width: 16px; height: 16px; border-radius: 50%;
+    background: var(--knob);
+    transition: transform .15s ease-out;
+  }
+  .switch input:checked + .track { background: var(--accent); }
+  .switch input:checked + .track::after { transform: translateX(16px); }
+  .switch input:focus-visible + .track { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .switch-text { display: flex; flex-direction: column; gap: 2px; }
+
+  .sheet-btns { display: flex; justify-content: flex-end; gap: 8px; padding-top: 4px; }
+
+  /* ---- narrow ------------------------------------------------------- */
+
+  @media (max-width: 1100px) {
+    .grid5 { grid-template-columns: 150px minmax(40px, 1fr) 150px minmax(0, 1.4fr) auto; gap: 12px; }
+    .empty-art { grid-template-columns: 150px minmax(40px, 240px) 150px; gap: 12px; }
+  }
+  @media (max-width: 820px) {
+    .shell { flex-direction: column; }
+    .side { position: static; width: auto; height: auto; border-right: 0; border-bottom: 1px solid var(--hair); }
+    .side .grow { display: none; }
+    .side-foot { padding-top: 12px; }
+    .main { padding: 22px 16px 40px; }
+    .legend { display: none; }
+    .grid5 {
+      grid-template-columns: minmax(0, 1fr) minmax(32px, 72px) minmax(0, 1fr);
+      grid-template-areas: "l w r" "i i a";
+      row-gap: 12px;
+    }
+    .grid5 > .pchip.l { grid-area: l; }
+    .grid5 > .wire-cell { grid-area: w; }
+    .grid5 > .pchip.r { grid-area: r; }
+    .grid5 > .info { grid-area: i; padding-left: 0; }
+    .grid5 > .acts { grid-area: a; }
+    .empty-art { grid-template-columns: minmax(0, 1fr) minmax(32px, 72px) minmax(0, 1fr); }
+    .pchip { padding: 8px 10px; }
+    .pnum { font-size: 17px; }
+    .top-count { display: none; }
+    table.lst col.c-addr { width: 0; }
+    table.lst td.la { padding: 0; font-size: 0; }
+    .pair { flex-direction: column; }
+    .ttl-row .seg { width: 100%; }
+    .sheet form { padding: 18px 16px; }
   }
 </style>
 </head>
 <body>
-<main>
-  <div id="app">
-    <header>
-      <h1>portkeeper</h1>
-      <div class="head-right">
-        <div id="summary" data-link="up">
-          <span id="link-dot"></span>
-          <span id="summary-text">connecting</span>
+
+<header class="top">
+  <span class="mark" aria-hidden="true"><svg class="ico" width="20" height="20" viewBox="0 0 24 24" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="3"></rect><path d="M8 12h7"></path><path d="M12 9l3 3-3 3"></path></svg></span>
+  <span class="app">Portkeeper</span>
+  <span class="grow"></span>
+  <span class="top-status" id="top-status" role="status" aria-live="polite"><span class="dot" id="top-dot" data-state="off"></span><span id="top-text">Connecting</span></span>
+  <span class="top-count" id="top-count"></span>
+</header>
+
+<div class="shell">
+  <nav class="side" aria-label="Hosts">
+    <div class="side-title">Hosts</div>
+    <ul class="host-list" id="host-list"></ul>
+    <div class="side-add">
+      <button type="button" class="btn ghost small" id="addhost-toggle" aria-expanded="false" aria-controls="addhost">
+        <svg class="ico" width="14" height="14" viewBox="0 0 24 24" stroke-width="1.6" aria-hidden="true"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>Add host
+      </button>
+      <form class="addhost hidden" id="addhost">
+        <label for="addhost-name">SSH alias</label>
+        <input type="text" class="mono" id="addhost-name" name="alias" autocomplete="off" spellcheck="false" placeholder="box2">
+        <div class="row-btns">
+          <button type="submit" class="btn primary small" id="addhost-save">Add host</button>
+          <button type="button" class="btn ghost small" id="addhost-cancel">Cancel</button>
         </div>
-      </div>
-    </header>
-
-    <p id="flash" class="flash hidden" role="status" aria-live="polite"></p>
-
-    <div class="bay">
-      <div class="caps">
-        <span class="cap" id="cap-remote">remote</span>
-        <span class="cap" id="cap-local">this mac</span>
-      </div>
-
-      <ul id="list"></ul>
-
-      <div id="empty" class="bay-note hidden">
-        <p>Nothing patched.</p>
-        <p>Patch a port below, or press <b>Discover</b> to see what a host is listening on.</p>
-      </div>
-
-      <div id="down" class="bay-note down hidden">
-        <p>portkeeperd isn't answering.</p>
-        <p>Start <code>portkeeperd</code> — this page reconnects on its own.</p>
-      </div>
-
-      <div class="foot" id="foot">
-        <button type="button" id="add-toggle" class="patch" aria-expanded="false" aria-controls="add-form">
-          <span class="plus" aria-hidden="true">+</span><span>Patch a port</span>
-        </button>
-      </div>
-
-      <form id="add-form" class="form hidden" data-dir="local-forward">
-        <div class="seg" role="group" aria-label="Direction">
-          <label>
-            <input type="radio" name="direction" value="local-forward" checked>
-            <span>local-forward</span>
-          </label>
-          <label>
-            <input type="radio" name="direction" value="remote-forward">
-            <span>remote-forward</span>
-          </label>
-        </div>
-
-        <p class="hint" id="dir-hint"></p>
-
-        <div class="fields">
-          <label class="f f-host">
-            <span>host</span>
-            <select name="host" id="host-select"></select>
-          </label>
-          <label class="f f-port f-remote">
-            <span>remote port</span>
-            <input type="text" name="remote_port" autocomplete="off" placeholder="8530">
-          </label>
-          <label class="f f-target">
-            <span>target host <em>on remote</em></span>
-            <input type="text" name="remote_host" autocomplete="off" spellcheck="false" placeholder="localhost">
-          </label>
-          <label class="f f-port f-local">
-            <span>local port</span>
-            <input type="text" name="local_port" autocomplete="off" placeholder="same">
-          </label>
-          <label class="f f-label">
-            <span>label <em>optional</em></span>
-            <input type="text" name="label" autocomplete="off" placeholder="mkdp">
-          </label>
-          <label class="f f-ttl">
-            <span>ttl <em>secs</em></span>
-            <input type="text" name="ttl" inputmode="numeric" autocomplete="off" placeholder="8h">
-          </label>
-        </div>
-
-        <div class="addhost hidden" id="addhost">
-          <label class="f">
-            <span>new host <em>ssh alias</em></span>
-            <input type="text" id="addhost-name" autocomplete="off" spellcheck="false" placeholder="box2">
-          </label>
-          <button type="button" class="ghost" id="addhost-save">Add host</button>
-          <button type="button" class="ghost" id="addhost-cancel">Cancel</button>
-        </div>
-
-        <p class="hostnote hidden" id="hostnote"></p>
-
-        <label class="check" id="open-wrap">
-          <input type="checkbox" name="open">
-          <span>open in browser</span>
-        </label>
-
-        <label class="check" id="pin-wrap">
-          <input type="checkbox" name="pinned">
-          <span>keep across restarts</span>
-        </label>
-
-        <div class="actions">
-          <button type="submit" class="primary">Patch it</button>
-          <button type="button" class="ghost" id="add-cancel">Cancel</button>
-        </div>
-
-        <p class="err hidden" id="add-err" role="alert"></p>
+        <p class="err hidden" id="addhost-err" role="alert"></p>
       </form>
     </div>
+    <span class="grow"></span>
+    <div class="side-foot">
+      <div id="daemon-line">Daemon on this Mac</div>
+      <div>Log at /tmp/portkeeper.log</div>
+    </div>
+  </nav>
 
-    <!-- Discovery is a separate surface from the bay on purpose: the bay is what this
-         daemon holds, and this is what the other machine happens to be running. Merging
-         them would blur the one distinction the whole design rests on. -->
-    <section class="probe" id="probe">
-      <div class="probe-head">
-        <h2>Listening on <select id="probe-host" aria-label="Host to inspect"></select></h2>
-        <div class="probe-tools">
-          <button type="button" class="linkbtn" id="probe-run">Discover</button>
+  <main class="main" id="main">
+    <p class="flash hidden" id="flash" role="status" aria-live="polite"></p>
+
+    <div class="notice hidden" id="down">
+      <h2>The daemon is not answering.</h2>
+      <p>Start portkeeperd and this page picks it up again on its own.</p>
+    </div>
+
+    <div class="notice hidden" id="nohosts">
+      <h2>No hosts yet.</h2>
+      <p>Add the SSH alias of a machine you reach from this Mac, with Add host on the left. Hosts in your ~/.ssh/config are listed here automatically.</p>
+    </div>
+
+    <section class="host-view hidden" id="host-view" aria-labelledby="host-name">
+      <div class="host-head">
+        <div class="titles">
+          <h1 id="host-name"></h1>
+          <div class="host-info" id="host-info"></div>
+        </div>
+        <div class="head-btns">
+          <button type="button" class="btn ghost hidden" id="host-remove">Remove host</button>
+          <button type="button" class="btn primary" id="add-open">
+            <svg class="ico" width="14" height="14" viewBox="0 0 24 24" stroke-width="2" aria-hidden="true"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>Add mapping
+          </button>
         </div>
       </div>
-      <p class="probe-note hidden" id="probe-note" role="status" aria-live="polite"></p>
+
+      <div class="hidden" id="table-wrap">
+        <div class="legend grid5" aria-hidden="true">
+          <span class="mono" id="legend-host"></span>
+          <span>The arrow points where the port appears</span>
+          <span>this Mac</span>
+        </div>
+        <ul class="rows" id="list" aria-label="Mappings"></ul>
+      </div>
+
+      <div class="empty hidden" id="empty">
+        <div class="empty-art" data-dir="local-forward" aria-hidden="true">
+          <div class="pchip dashed"><div class="pnum">:&nbsp;</div><div class="psub" id="empty-host-chip">on host</div></div>
+          <div class="wire-cell" data-dir="local-forward"><svg class="wire dashed"><circle class="w-dot" cx="4" cy="12" r="3"></circle><line class="w-line" x1="7" y1="12" x2="100%" y2="12"></line><svg x="100%" y="0" overflow="visible"><path class="w-head" d="M-7 6l7 6-7 6"></path></svg></svg></div>
+          <div class="pchip dashed"><div class="pnum">:&nbsp;</div><div class="psub">on this Mac</div></div>
+        </div>
+        <div class="empty-copy">
+          <h2 id="empty-title">Nothing is mapped yet.</h2>
+          <p id="empty-text">Add a mapping by port, or look at what the host is listening on and forward one from the list. A mapping you keep across restarts comes back on its own.</p>
+        </div>
+        <div class="empty-btns">
+          <button type="button" class="btn primary" id="empty-add">
+            <svg class="ico" width="14" height="14" viewBox="0 0 24 24" stroke-width="2" aria-hidden="true"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>Add mapping
+          </button>
+          <button type="button" class="btn ghost" id="empty-discover">
+            <svg class="ico" width="14" height="14" viewBox="0 0 24 24" stroke-width="1.6" aria-hidden="true"><circle cx="11" cy="11" r="6"></circle><path d="M20 20l-4.2-4.2"></path></svg><span id="empty-discover-text">Discover ports</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- What the host happens to be running, kept apart from what this daemon holds. -->
+    <section class="probe hidden" id="probe" aria-labelledby="probe-title">
+      <div class="probe-head">
+        <h2 id="probe-title">Listening on <span class="mono" id="probe-host"></span></h2>
+        <span class="caption" id="probe-note" aria-live="polite"></span>
+        <span class="grow"></span>
+        <button type="button" class="btn ghost small" id="probe-run">
+          <svg class="ico" width="14" height="14" viewBox="0 0 24 24" stroke-width="1.6" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.7"></path><path d="M20 4v5h-5"></path></svg><span id="probe-run-text">Refresh</span>
+        </button>
+      </div>
+      <p class="probe-msg hidden" id="probe-msg" role="status"></p>
       <table class="lst hidden" id="probe-table">
-        <thead>
-          <tr><th>port</th><th>address</th><th>process</th><th></th></tr>
-        </thead>
+        <colgroup><col class="c-port"><col><col class="c-addr"><col class="c-act"></colgroup>
+        <thead class="sr-only"><tr><th>Port</th><th>Process or container</th><th>Address</th><th>Action</th></tr></thead>
         <tbody id="probe-rows"></tbody>
       </table>
     </section>
-  </div>
-</main>
+  </main>
+</div>
+
+<div class="menu hidden" id="row-menu" role="menu" aria-label="Mapping actions">
+  <button type="button" role="menuitem" id="menu-edit">Edit</button>
+  <button type="button" role="menuitem" id="menu-pin">Keep across restarts</button>
+  <hr>
+  <button type="button" role="menuitem" id="menu-close">Close mapping</button>
+</div>
+
+<dialog class="sheet" id="sheet" aria-labelledby="sheet-title">
+  <form id="add-form" data-dir="local-forward" novalidate>
+    <div class="stack">
+      <h2 id="sheet-title">Add mapping</h2>
+      <fieldset id="dir-field">
+        <legend class="sr-only">Direction</legend>
+        <div class="seg">
+          <label><input type="radio" name="direction" value="local-forward" checked><span>Local-forward</span></label>
+          <label><input type="radio" name="direction" value="remote-forward"><span>Remote-forward</span></label>
+        </div>
+      </fieldset>
+      <div class="dir-hint" id="dir-hint"></div>
+    </div>
+
+    <div class="mini" id="mini" data-dir="local-forward" aria-hidden="true">
+      <div class="pchip"><div class="pnum" id="mini-l-port">:&nbsp;</div><div class="psub" id="mini-l-sub">on host</div></div>
+      <div class="wire-cell" id="mini-wire" data-dir="local-forward"><svg class="wire"><circle class="w-dot" cx="4" cy="12" r="3"></circle><line class="w-line" x1="7" y1="12" x2="100%" y2="12"></line><svg x="100%" y="0" overflow="visible"><path class="w-head" d="M-7 6l7 6-7 6"></path></svg></svg></div>
+      <div class="pchip r"><div class="pnum" id="mini-r-port">:&nbsp;</div><div class="psub">on this Mac</div></div>
+    </div>
+
+    <div class="pair">
+      <div class="fld">
+        <label for="f-remote">Remote port</label>
+        <input type="text" class="mono" id="f-remote" name="remote_port" inputmode="numeric" autocomplete="off" spellcheck="false">
+        <div class="hint" id="remote-hint">or a range, like 8000-8010</div>
+      </div>
+      <div class="fld">
+        <label for="f-local">Local port</label>
+        <input type="text" class="mono" id="f-local" name="local_port" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="same as remote">
+        <div class="hint" id="local-hint">if it is taken here, a free port is used instead</div>
+      </div>
+    </div>
+
+    <div class="fld" id="target-wrap">
+      <label for="f-target">Target host on <span id="target-host-name">the host</span></label>
+      <input type="text" class="mono" id="f-target" name="remote_host" autocomplete="off" spellcheck="false" placeholder="localhost">
+      <div class="hint">letters, digits, dots and dashes; no colons</div>
+    </div>
+
+    <div class="fld">
+      <label for="f-label">Label</label>
+      <input type="text" id="f-label" name="label" autocomplete="off" placeholder="what this is for">
+    </div>
+
+    <fieldset class="ttl-row" id="ttl-field">
+      <legend>Expires after</legend>
+      <div class="seg">
+        <label><input type="radio" name="ttl" value="3600"><span>1h</span></label>
+        <label><input type="radio" name="ttl" value="28800" checked><span>8h</span></label>
+        <label><input type="radio" name="ttl" value="86400"><span>24h</span></label>
+        <label><input type="radio" name="ttl" value="0"><span>never</span></label>
+      </div>
+      <div class="hint ttl-note hidden" id="ttl-note"></div>
+    </fieldset>
+
+    <div class="switches">
+      <label class="switch">
+        <input type="checkbox" role="switch" id="f-pinned" name="pinned">
+        <span class="track" aria-hidden="true"></span>
+        <span class="switch-text"><span>Keep across restarts</span><span class="hint">Pinned. Comes back after the daemon or the Mac restarts, and never expires.</span></span>
+      </label>
+      <label class="switch" id="open-wrap">
+        <input type="checkbox" role="switch" id="f-open" name="open">
+        <span class="track" aria-hidden="true"></span>
+        <span>Open in the browser when it is ready</span>
+      </label>
+    </div>
+
+    <p class="err hidden" id="add-err" role="alert"></p>
+
+    <div class="sheet-btns">
+      <button type="button" class="btn ghost" id="add-cancel">Cancel</button>
+      <button type="submit" class="btn primary" id="add-submit">Add mapping</button>
+    </div>
+  </form>
+</dialog>
 
 <script>
 (function () {
@@ -818,49 +726,106 @@
   var LOCAL_FWD = "local-forward";
   var REMOTE_FWD = "remote-forward";
   var API = "/admin";
+  var TTL_DEFAULT = "28800"; // 8h
+  var STORE_KEY = "portkeeper.host";
 
-  var listEl    = document.getElementById("list");
-  var emptyEl   = document.getElementById("empty");
-  var downEl    = document.getElementById("down");
-  var summaryEl = document.getElementById("summary");
-  var summaryTx = document.getElementById("summary-text");
-  var flashEl   = document.getElementById("flash");
-  var capRemote = document.getElementById("cap-remote");
-  var footEl    = document.getElementById("foot");
+  /* ---- elements ------------------------------------------------------ */
 
-  var addToggle = document.getElementById("add-toggle");
-  var addForm   = document.getElementById("add-form");
-  var addErr    = document.getElementById("add-err");
-  var addCancel = document.getElementById("add-cancel");
-  var dirHint   = document.getElementById("dir-hint");
-  var openWrap  = document.getElementById("open-wrap");
-  var openBox   = addForm.elements["open"];
-  var hostSel   = document.getElementById("host-select");
-  var hostNote  = document.getElementById("hostnote");
-  var addHost   = document.getElementById("addhost");
-  var addHostIn = document.getElementById("addhost-name");
+  var topDot     = document.getElementById("top-dot");
+  var topText    = document.getElementById("top-text");
+  var topCount   = document.getElementById("top-count");
 
-  var pinBox    = addForm.elements["pinned"];
-  var ttlBox    = addForm.elements["ttl"];
-  var targetWrap = addForm.querySelector(".f-target");
+  var hostListEl = document.getElementById("host-list");
+  var addHostBtn = document.getElementById("addhost-toggle");
+  var addHostEl  = document.getElementById("addhost");
+  var addHostIn  = document.getElementById("addhost-name");
+  var addHostErr = document.getElementById("addhost-err");
+  var daemonLine = document.getElementById("daemon-line");
 
+  var flashEl    = document.getElementById("flash");
+  var downEl     = document.getElementById("down");
+  var noHostsEl  = document.getElementById("nohosts");
+  var hostView   = document.getElementById("host-view");
+  var hostNameEl = document.getElementById("host-name");
+  var hostInfoEl = document.getElementById("host-info");
+  var hostRemove = document.getElementById("host-remove");
+  var addOpenBtn = document.getElementById("add-open");
+  var tableWrap  = document.getElementById("table-wrap");
+  var legendHost = document.getElementById("legend-host");
+  var listEl     = document.getElementById("list");
+  var emptyEl    = document.getElementById("empty");
+  var emptyTitle = document.getElementById("empty-title");
+  var emptyText  = document.getElementById("empty-text");
+  var emptyChip  = document.getElementById("empty-host-chip");
+  var emptyAdd   = document.getElementById("empty-add");
+  var emptyDisc  = document.getElementById("empty-discover");
+  var emptyDiscT = document.getElementById("empty-discover-text");
+
+  var probeEl    = document.getElementById("probe");
   var probeHost  = document.getElementById("probe-host");
-  var probeRun   = document.getElementById("probe-run");
   var probeNote  = document.getElementById("probe-note");
+  var probeRun   = document.getElementById("probe-run");
+  var probeRunT  = document.getElementById("probe-run-text");
+  var probeMsg   = document.getElementById("probe-msg");
   var probeTable = document.getElementById("probe-table");
   var probeRows  = document.getElementById("probe-rows");
 
-  var ADD_HOST = "__add_host__";
-  var hosts = [];
-  var lastHost = "";
+  var menuEl     = document.getElementById("row-menu");
+  var menuEdit   = document.getElementById("menu-edit");
+  var menuPin    = document.getElementById("menu-pin");
+  var menuClose  = document.getElementById("menu-close");
 
-  // Per-host connection state, fetched only when a row says it is reconnecting. The
-  // common case stays one request per poll.
+  var sheet      = document.getElementById("sheet");
+  var addForm    = document.getElementById("add-form");
+  var sheetTitle = document.getElementById("sheet-title");
+  var dirField   = document.getElementById("dir-field");
+  var dirHint    = document.getElementById("dir-hint");
+  var miniEl     = document.getElementById("mini");
+  var miniWire   = document.getElementById("mini-wire");
+  var miniLPort  = document.getElementById("mini-l-port");
+  var miniLSub   = document.getElementById("mini-l-sub");
+  var miniRPort  = document.getElementById("mini-r-port");
+  var remoteHint = document.getElementById("remote-hint");
+  var localHint  = document.getElementById("local-hint");
+  var targetWrap = document.getElementById("target-wrap");
+  var targetName = document.getElementById("target-host-name");
+  var ttlField   = document.getElementById("ttl-field");
+  var ttlNote    = document.getElementById("ttl-note");
+  var openWrap   = document.getElementById("open-wrap");
+  var addErr     = document.getElementById("add-err");
+  var addCancel  = document.getElementById("add-cancel");
+  var addSubmit  = document.getElementById("add-submit");
+
+  var remoteIn   = addForm.elements["remote_port"];
+  var localIn    = addForm.elements["local_port"];
+  var targetIn   = addForm.elements["remote_host"];
+  var labelIn    = addForm.elements["label"];
+  var pinBox     = addForm.elements["pinned"];
+  var openBox    = addForm.elements["open"];
+
+  /* ---- state --------------------------------------------------------- */
+
+  var hostBook = [];        // /admin/hosts, in the daemon's order
+  var hosts = [];           // hostBook plus any host that only appears on a mapping
+  var selected = "";
+  var allRows = [];         // the last /admin/forwards
+  var daemonUp = true;
+  var loadedOnce = false;
+
+  // Per-host connection state from /admin/status. It is fetched on load, after anything
+  // that can change a connection, and on every poll only while some row or host is not
+  // healthy, so the ordinary case stays one request per poll.
   var hostHealth = {};
+  var statusStale = true;
 
   var rowsByKey = new Map();
+  var probeCache = {};      // alias -> { rows, at }
+  var probing = "";
+  var probeSig = "";
+
   var timer = null, flashTimer = null;
-  var firstPaint = true;
+  var sheetMode = "add", editRefs = null, sheetOpener = null;
+  var menuRefs = null, menuOpener = null;
 
   /* ---- helpers ------------------------------------------------------- */
 
@@ -875,38 +840,38 @@
     return typeof v === "number" && isFinite(v) ? v : null;
   }
 
-  // Drawn rather than typed: the pencil glyphs (U+270E, U+270F) are missing from
-  // the macOS system sans stack and render as a tofu box.
-  function pencil() {
-    var NS = "http://www.w3.org/2000/svg";
-    var svg = document.createElementNS(NS, "svg");
-    svg.setAttribute("viewBox", "0 0 16 16");
-    svg.setAttribute("width", "12");
-    svg.setAttribute("height", "12");
-    svg.setAttribute("aria-hidden", "true");
-    svg.setAttribute("focusable", "false");
-    var p = document.createElementNS(NS, "path");
-    p.setAttribute("d", "M11.6 1.6a1.4 1.4 0 0 1 2 2l-.9.9-2-2 .9-.9ZM9.8 3.4l2 2L5 12.2l-2.6.6.6-2.6 6.8-6.8Z");
-    p.setAttribute("fill", "currentColor");
-    svg.appendChild(p);
-    return svg;
+  function plural(n, one, many) { return n + " " + (n === 1 ? one : many); }
+
+  var ICONS = {
+    ext: '<path d="M14 4h6v6"></path><path d="M20 4l-9 9"></path><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"></path>',
+    more: '<circle cx="5" cy="12" r="1.2"></circle><circle cx="12" cy="12" r="1.2"></circle><circle cx="19" cy="12" r="1.2"></circle>',
+    pin: '<path d="M12 17v5"></path><path d="M9 3h6l-1 6 3 3H7l3-3z"></path>'
+  };
+
+  // Every icon is a stroke drawing: glyph fallbacks on this machine are emoji, and an
+  // emoji in a row of port numbers reads as a sticker.
+  function icon(name, size) {
+    var s = size || 14;
+    var span = el("span");
+    span.style.display = "inline-flex";
+    span.innerHTML = '<svg class="ico" width="' + s + '" height="' + s +
+      '" viewBox="0 0 24 24" stroke-width="1.6" aria-hidden="true" focusable="false">' +
+      ICONS[name] + "</svg>";
+    return span.firstChild;
   }
 
-  // Drawn for the same reason the pencil is: the pushpin glyphs are emoji on this
-  // machine, and an emoji in a row of monospace machine truth reads as a sticker.
-  function pinIcon() {
-    var NS = "http://www.w3.org/2000/svg";
-    var svg = document.createElementNS(NS, "svg");
-    svg.setAttribute("viewBox", "0 0 16 16");
-    svg.setAttribute("width", "10");
-    svg.setAttribute("height", "10");
-    svg.setAttribute("aria-hidden", "true");
-    svg.setAttribute("focusable", "false");
-    var p = document.createElementNS(NS, "path");
-    p.setAttribute("d", "M9.4 1.2 14.8 6.6l-1.1 1.1-1.2-.3-2.3 2.3.2 1.9-1.1 1.1L6 9.4l-4 4.6 4.6-4L3.3 6.7l1.1-1.1 1.9.2 2.3-2.3-.3-1.2 1.1-1.1Z");
-    p.setAttribute("fill", "currentColor");
-    svg.appendChild(p);
-    return svg;
+  // The cable: dot at the origin, arrowhead at the destination. It is always drawn
+  // pointing right and a remote-forward mirrors it in CSS, so the head lands on the
+  // machine where the port appears.
+  var WIRE = '<svg class="wire" aria-hidden="true" focusable="false">' +
+    '<circle class="w-dot" cx="4" cy="12" r="3"></circle>' +
+    '<line class="w-line" x1="7" y1="12" x2="100%" y2="12"></line>' +
+    '<svg x="100%" y="0" overflow="visible"><path class="w-head" d="M-7 6l7 6-7 6"></path></svg></svg>';
+
+  function wireCell() {
+    var d = el("div", "wire-cell");
+    d.innerHTML = WIRE;
+    return d;
   }
 
   function dirOf(r) {
@@ -922,8 +887,7 @@
   }
 
   // The daemon sends `id`; compute the documented shape if an older build omits it. The
-  // target host is part of the id only when it is set, so a mapping to the remote itself
-  // keeps the short three-part form.
+  // target host is part of the id only when it is set.
   function keyOf(r) {
     if (r && typeof r.id === "string" && r.id) return r.id;
     var rp = (r && r.remote_port != null) ? String(r.remote_port) : "?";
@@ -971,9 +935,8 @@
     return { start: start, end: end, ranged: true };
   }
 
-  // Same rule as the daemon's, and for the same reason: the value is spliced into a
-  // colon-delimited ssh forward spec, so a colon in it would mean something else
-  // entirely. Checked here too so the mistake is caught before a round trip.
+  // Same rule as the daemon's: the value is spliced into a colon-delimited ssh forward
+  // spec, so a colon in it would mean something else entirely.
   function safeTarget(v) {
     return /^[A-Za-z0-9_][A-Za-z0-9_.\-]*$/.test(v);
   }
@@ -982,18 +945,17 @@
   // URL may become an href. A remote-forward's listener lives on the remote box,
   // so it has no Mac-side address and must not get a link at all.
   function safeUrl(r) {
+    if (dirOf(r) !== LOCAL_FWD) return null;
     var raw = typeof r.url === "string" ? r.url : "";
     if (/^http:\/\/(127\.0\.0\.1|localhost):\d+(\/|$)/.test(raw)) return raw;
-    if (dirOf(r) === LOCAL_FWD) {
-      var port = num(r.local_port);
-      if (port != null) return "http://127.0.0.1:" + port;
-    }
+    var port = num(r.local_port);
+    if (port != null) return "http://127.0.0.1:" + port;
     return null;
   }
 
-  // There is no login. The daemon refuses what a browser says is cross-site, and it
-  // wants every write to declare JSON: that header is what forces a preflight on a
-  // cross-origin caller, so it is sent on every mutating call, body or not.
+  // The daemon refuses what a browser says is cross-site, and it wants every write to
+  // declare JSON: that header is what forces a preflight on a cross-origin caller, so it
+  // is sent on every mutating call, body or not. Errors come back as {"error": "..."}.
   function api(method, path, body) {
     var opts = {
       method: method,
@@ -1015,6 +977,10 @@
     });
   }
 
+  function msgOf(err, fallback) {
+    return err && err.message ? err.message : fallback;
+  }
+
   function showErr(node, message) {
     node.textContent = message;
     node.classList.remove("hidden");
@@ -1025,759 +991,390 @@
     node.classList.add("hidden");
   }
 
-  function flash(kind, parts) {
-    flashEl.textContent = "";
-    parts.forEach(function (p) {
-      flashEl.appendChild(typeof p === "string" ? document.createTextNode(p) : p);
-    });
+  function flash(kind, text) {
+    flashEl.textContent = text;
     flashEl.dataset.kind = kind;
     flashEl.classList.remove("hidden");
     if (flashTimer) clearTimeout(flashTimer);
     flashTimer = setTimeout(function () { flashEl.classList.add("hidden"); }, 6000);
   }
 
-  /* ---- add form ------------------------------------------------------ */
-
-  function currentDir() {
-    return addForm.elements["direction"].value === REMOTE_FWD ? REMOTE_FWD : LOCAL_FWD;
+  function store(v) {
+    try { localStorage.setItem(STORE_KEY, v); } catch (e) { /* private window */ }
+  }
+  function stored() {
+    try { return localStorage.getItem(STORE_KEY) || ""; } catch (e) { return ""; }
   }
 
-  function syncDir() {
-    var dir = currentDir();
-    addForm.dataset.dir = dir;
+  /* ---- hosts --------------------------------------------------------- */
 
-    if (dir === LOCAL_FWD) {
-      dirHint.textContent =
-        "Reach a service running on the remote host from this Mac. " +
-        "Leave the local port blank to mirror the remote port when it is free. " +
-        "A remote port may be a range, like 8000-8010.";
-      addForm.elements["local_port"].placeholder = "same";
-      openWrap.classList.remove("off");
-      openBox.disabled = false;
-      targetWrap.classList.remove("hidden");
-    } else {
-      dirHint.textContent =
-        "Let the remote host reach a service running on this Mac. Both ports are required.";
-      addForm.elements["local_port"].placeholder = "3000";
-      // Nothing to open here: the listener ends up on the remote host.
-      openWrap.classList.add("off");
-      openBox.checked = false;
-      openBox.disabled = true;
-      // The target of a remote-forward is this Mac, which is always localhost. Showing
-      // the field would suggest it could be something else.
-      targetWrap.classList.add("hidden");
-      addForm.elements["remote_host"].value = "";
+  function bookEntry(alias) {
+    return hostBook.filter(function (h) { return h.alias === alias; })[0] || null;
+  }
+
+  function rowsOn(alias) {
+    return allRows.filter(function (r) { return hostOf(r) === alias; });
+  }
+
+  // "up", "retry" or "off". /admin/status is the authority; a host it does not list yet
+  // is still up if the daemon is carrying a live mapping on it.
+  function hostState(alias) {
+    var h = hostHealth[alias];
+    if (h && h.healthy === true) return "up";
+    if (h && h.healthy === false) return "retry";
+    var rows = rowsOn(alias);
+    if (rows.some(function (r) { return r.state === "reconnecting"; })) return "retry";
+    if (rows.some(function (r) { return r.state === "alive"; })) return "up";
+    return "off";
+  }
+
+  function retryText(alias) {
+    var h = hostHealth[alias] || {};
+    var parts = [];
+    if (num(h.attempts)) parts.push("attempt " + h.attempts);
+    if (num(h.next_retry_in)) parts.push("next try in " + duration(h.next_retry_in));
+    return parts.join(", ");
+  }
+
+  function mergeHosts() {
+    var seen = {};
+    hosts = [];
+    hostBook.forEach(function (h) {
+      if (!h || !h.alias || seen[h.alias]) return;
+      seen[h.alias] = 1;
+      hosts.push(h);
+    });
+    // A mapping on a host the book no longer lists must still be reachable to close.
+    allRows.forEach(function (r) {
+      var a = hostOf(r);
+      if (seen[a]) return;
+      seen[a] = 1;
+      hosts.push({ alias: a, hostname: "", source: "" });
+    });
+
+    if (!hosts.some(function (h) { return h.alias === selected; })) {
+      var want = stored();
+      selected = hosts.some(function (h) { return h.alias === want; })
+        ? want
+        : (hosts.length ? hosts[0].alias : "");
     }
-    syncPin();
   }
 
-  // A pin and a lease are contradictory instructions, and the daemon resolves that by
-  // dropping the lease. The form says so rather than letting a typed TTL vanish.
-  function syncPin() {
-    var pinned = pinBox.checked;
-    ttlBox.disabled = pinned;
-    if (pinned) ttlBox.value = "";
-    ttlBox.placeholder = pinned ? "none" : "8h";
+  var sidebarSig = "";
+
+  function sidebarLine(h) {
+    var st = hostState(h.alias);
+    return [h.alias, h.hostname || "", st, st === "retry" ? retryText(h.alias) : "",
+      (hostHealth[h.alias] || {}).last_error || "", h.alias === selected ? 1 : 0].join("\u0001");
   }
 
-  /* ---- hosts -------------------------------------------------------- */
-
-  // Hosts come from three places — LG_HOSTS, ~/.ssh/config, and ones typed here — and
-  // any of them can be forwarded to. LG_HOSTS comes first in the list because those are
-  // the boxes in daily use, not because the others are second class.
-  function paintHosts(selected) {
-    var want = selected || hostSel.value || lastHost;
-    hostSel.textContent = "";
+  function paintSidebar() {
+    // Rebuilt only when something it shows changed: a rebuild between mousedown and
+    // mouseup would swallow the click.
+    var sig = hosts.map(sidebarLine).join("\u0002");
+    if (sig === sidebarSig) return;
+    sidebarSig = sig;
+    // Keep keyboard focus on the host that had it.
+    var focused = document.activeElement && document.activeElement.dataset
+      ? document.activeElement.dataset.alias : null;
+    hostListEl.textContent = "";
 
     hosts.forEach(function (h) {
-      // Alias only: an option wide enough for a hostname truncates mid-address, which
-      // is worse than not showing it. The detail goes on the note line instead.
-      var o = document.createElement("option");
-      o.value = h.alias;
-      o.textContent = h.alias;
-      if (h.hostname) o.title = h.hostname;
-      hostSel.appendChild(o);
+      var st = hostState(h.alias);
+      var li = el("li");
+      var b = el("button", "host");
+      b.type = "button";
+      b.dataset.alias = h.alias;
+      b.setAttribute("aria-current", h.alias === selected ? "true" : "false");
+
+      var top = el("div", "host-top");
+      var dot = el("span", "dot");
+      dot.dataset.state = st;
+      top.append(dot, el("span", "mono", h.alias));
+      b.appendChild(top);
+
+      if (st === "retry") {
+        b.appendChild(el("div", "host-sub warn", "reconnecting"));
+        var rt = retryText(h.alias);
+        if (rt) b.appendChild(el("div", "host-sub", rt));
+        var le = (hostHealth[h.alias] || {}).last_error;
+        if (le) b.title = String(le);
+      } else if (st === "up") {
+        b.appendChild(el("div", "host-sub", h.hostname || "connected"));
+      } else {
+        b.appendChild(el("div", "host-sub", "not connected"));
+      }
+
+      b.addEventListener("click", function () { selectHost(h.alias); });
+      li.appendChild(b);
+      hostListEl.appendChild(li);
+      if (focused === h.alias) b.focus();
     });
-
-    var sep = document.createElement("option");
-    sep.value = ADD_HOST;
-    sep.textContent = hosts.length ? "add a host…" : "add the first host…";
-    hostSel.appendChild(sep);
-
-    if (want && hosts.some(function (h) { return h.alias === want; })) hostSel.value = want;
-    else if (hosts.length) hostSel.value = hosts[0].alias;
-    syncHostNote();
-    paintProbeHosts();
   }
 
-  // The discovery picker is deliberately its own control rather than following the add
-  // form's: looking at what a box is running is a thing you do BEFORE deciding to patch
-  // anything, so it has to work with the add form closed.
-  function paintProbeHosts() {
-    var want = probeHost.value || lastHost;
-    probeHost.textContent = "";
-    hosts.forEach(function (h) {
-      var o = document.createElement("option");
-      o.value = h.alias;
-      o.textContent = h.alias;
-      probeHost.appendChild(o);
-    });
-    if (want && hosts.some(function (h) { return h.alias === want; })) probeHost.value = want;
-    probeRun.disabled = hosts.length === 0;
+  function selectHost(alias) {
+    if (alias === selected) return;
+    selected = alias;
+    store(alias);
+    closeMenu();
+    statusStale = true;
+    probeSig = "";
+    renderAll();
   }
 
-  function syncHostNote() {
-    var alias = hostSel.value;
-    if (alias === ADD_HOST) { hostNote.classList.add("hidden"); return; }
-    lastHost = alias;
-    var h = hosts.filter(function (x) { return x.alias === alias; })[0];
-    if (!h) { hostNote.classList.add("hidden"); return; }
-
-    hostNote.textContent = "";
-    if (h.hostname) hostNote.appendChild(el("span", "m", h.hostname));
-    hostNote.classList.toggle("hidden", !hostNote.textContent);
-  }
-
-  function loadHosts(selected) {
+  function loadHosts() {
     return api("GET", API + "/hosts").then(function (rows) {
-      hosts = Array.isArray(rows) ? rows : [];
-      paintHosts(selected);
-    }).catch(function (err) {
-      hosts = [];
-      paintHosts(selected);
+      hostBook = Array.isArray(rows) ? rows : [];
+    }).catch(function () {
+      // An older daemon, or no host book: the sidebar falls back to hosts on mappings.
+      hostBook = [];
+    }).then(function () {
+      mergeHosts();
+      renderAll();
     });
   }
 
-  hostSel.addEventListener("change", function () {
-    if (hostSel.value === ADD_HOST) {
-      addHost.classList.remove("hidden");
-      // The note described the host that was selected a moment ago; leaving it up
-      // makes it read as a comment on the host being typed.
-      hostNote.classList.add("hidden");
-      addHostIn.value = "";
-      addHostIn.focus();
-    } else {
-      addHost.classList.add("hidden");
-      syncHostNote();
-    }
-  });
+  function fetchStatus() {
+    return api("GET", API + "/status").then(function (st) {
+      st = st || {};
+      hostHealth = (st.hosts && typeof st.hosts === "object" && !Array.isArray(st.hosts)) ? st.hosts : {};
+      if (typeof st.listen === "string" && st.listen) daemonLine.textContent = "Daemon on " + st.listen;
+      statusStale = false;
+    }).catch(function () { /* the row states still say enough */ });
+  }
 
-  document.getElementById("addhost-cancel").addEventListener("click", function () {
-    addHost.classList.add("hidden");
-    paintHosts(lastHost);
-    hostSel.focus();
-  });
+  function needStatus() {
+    if (statusStale) return true;
+    if (allRows.some(function (r) { return r.state === "reconnecting"; })) return true;
+    return Object.keys(hostHealth).some(function (k) {
+      return hostHealth[k] && hostHealth[k].healthy === false;
+    });
+  }
 
-  document.getElementById("addhost-save").addEventListener("click", function () {
+  function toggleAddHost(show) {
+    addHostEl.classList.toggle("hidden", !show);
+    addHostBtn.classList.toggle("hidden", show);
+    addHostBtn.setAttribute("aria-expanded", show ? "true" : "false");
+    clearErr(addHostErr);
+    if (show) { addHostIn.value = ""; addHostIn.focus(); }
+    else addHostBtn.focus();
+  }
+
+  addHostBtn.addEventListener("click", function () { toggleAddHost(true); });
+  document.getElementById("addhost-cancel").addEventListener("click", function () { toggleAddHost(false); });
+  addHostEl.addEventListener("keydown", function (ev) {
+    if (ev.key === "Escape") { ev.preventDefault(); toggleAddHost(false); }
+  });
+  addHostEl.addEventListener("submit", function (ev) {
+    ev.preventDefault();
     var alias = addHostIn.value.trim();
     if (!alias) { addHostIn.focus(); return; }
-    clearErr(addErr);
+    clearErr(addHostErr);
     api("POST", API + "/hosts", { alias: alias }).then(function () {
-      addHost.classList.add("hidden");
-      return loadHosts(alias);
+      toggleAddHost(false);
+      selected = alias;
+      store(alias);
+      statusStale = true;
+      return loadHosts();
     }).catch(function (err) {
-      showErr(addErr, err && err.message ? err.message : "That host was not accepted.");
+      showErr(addHostErr, msgOf(err, "That host was not accepted."));
       addHostIn.focus();
     });
   });
 
-  function openAdd(selectHost) {
-    loadHosts(selectHost);
-    addForm.classList.remove("hidden");
-    addToggle.setAttribute("aria-expanded", "true");
-    var first = currentDir() === REMOTE_FWD
-      ? addForm.elements["local_port"]
-      : addForm.elements["remote_port"];
-    first.focus();
-  }
-
-  function closeAdd() {
-    addForm.classList.add("hidden");
-    addToggle.setAttribute("aria-expanded", "false");
-    clearErr(addErr);
-  }
-
-  addToggle.addEventListener("click", function () {
-    if (addForm.classList.contains("hidden")) openAdd();
-    else closeAdd();
-  });
-  addCancel.addEventListener("click", closeAdd);
-
-  Array.prototype.forEach.call(addForm.elements["direction"], function (radio) {
-    radio.addEventListener("change", syncDir);
-  });
-  pinBox.addEventListener("change", syncPin);
-
-  addForm.addEventListener("submit", function (ev) {
-    ev.preventDefault();
-    clearErr(addErr);
-
-    var dir = currentDir();
-    var host = addForm.elements["host"].value.trim();
-    var rawRemote = addForm.elements["remote_port"].value.trim();
-    var rawLocal = addForm.elements["local_port"].value.trim();
-    var rawTtl = addForm.elements["ttl"].value.trim();
-
-    if (!host || host === ADD_HOST) {
-      showErr(addErr, "Pick a host, or add one first.");
-      return;
-    }
-
-    var remote = portRange(rawRemote);
-    if (remote == null) {
-      showErr(addErr, "Remote port must be a whole number between 1024 and 65535, or a range like 8000-8010.");
-      return;
-    }
-    var remotePort = remote.start;
-
-    var body = {
-      direction: dir,
-      host: host,
-      remote_port: remotePort,
-      label: addForm.elements["label"].value.trim(),
-      open: !openBox.disabled && openBox.checked,
-      pinned: pinBox.checked,
-      requester: "console"
-    };
-    if (remote.ranged) body.remote_port_end = remote.end;
-
-    var rawTarget = addForm.elements["remote_host"].value.trim();
-    if (rawTarget && dir === LOCAL_FWD) {
-      if (!safeTarget(rawTarget)) {
-        showErr(addErr, "Target host may contain only letters, digits, dot, dash and underscore — no colons, so no IPv6 literals.");
-        return;
-      }
-      body.remote_host = rawTarget;
-    }
-
-    if (rawLocal) {
-      var local = portRange(rawLocal);
-      if (local == null) {
-        showErr(addErr, "Local port must be a whole number between 1024 and 65535, or a range.");
-        return;
-      }
-      if (local.ranged && remote.ranged && (local.end - local.start) !== (remote.end - remote.start)) {
-        showErr(addErr, "The local and remote ranges cover different numbers of ports.");
-        return;
-      }
-      body.local_port = local.start;
-      if (local.ranged) body.local_port_end = local.end;
-    } else if (dir === REMOTE_FWD) {
-      showErr(addErr, "A remote-forward needs the local port of the service to publish.");
-      return;
-    }
-
-    if (rawTtl && !pinBox.checked) {
-      if (!/^\d+$/.test(rawTtl)) { showErr(addErr, "TTL must be a whole number of seconds."); return; }
-      body.ttl = parseInt(rawTtl, 10);
-    }
-
-    api("POST", API + "/forward", body).then(function (res) {
-      res = res || {};
-
-      // A range answers with an envelope; a single port keeps the shape it always had.
-      if (Array.isArray(res.forwards)) {
-        flash("added", ["Patched ", el("span", "m", String(res.forwards.length)),
-          " mappings on ", el("span", "m", host), "."]);
-      } else {
-        var rdir = res.direction === REMOTE_FWD ? REMOTE_FWD : dir;
-        var rlocal = num(res.local_port);
-        var rremote = num(res.remote_port);
-        if (rremote == null) rremote = remotePort;
-
-        var left  = el("span", "m", endpointText(rdir, "src", host, rremote, rlocal, res.remote_host));
-        var right = el("span", "m", endpointText(rdir, "dst", host, rremote, rlocal, res.remote_host));
-
-        flash(res.reused ? "reused" : "added",
-          res.reused
-            ? ["Already patched — reusing ", left, " to ", right, "."]
-            : ["Patched ", left, " to ", right, "."]);
-      }
-
-      addForm.reset();
-      syncDir();
-      paintHosts(host); // reset() drops the picker back to its first option
-      closeAdd();
-      schedule(true);
+  hostRemove.addEventListener("click", function () {
+    var alias = selected;
+    if (!alias) return;
+    hostRemove.disabled = true;
+    api("DELETE", API + "/hosts/" + encodeURIComponent(alias)).then(function () {
+      delete probeCache[alias];
+      selected = "";
+      store("");
+      flash("added", "Removed " + alias + " from the host list.");
+      return loadHosts();
     }).catch(function (err) {
-      showErr(addErr, err && err.message ? err.message : "The daemon rejected that mapping.");
-    });
+      flash("error", msgOf(err, "Could not remove that host."));
+    }).then(function () { hostRemove.disabled = false; });
   });
 
-  // Which machine sits on which side, given a direction. Used for flash copy,
-  // where there are no rails to carry the machine identity.
-  function endpointText(dir, side, host, remotePort, localPort, target) {
-    var remoteTx = host + ":" + (target ? target + ":" : "") +
-      (remotePort != null ? remotePort : "?");
-    var localTx = "127.0.0.1:" + (localPort != null ? localPort : "?");
-    if (dir === REMOTE_FWD) return side === "src" ? localTx : remoteTx;
-    return side === "src" ? remoteTx : localTx;
+  /* ---- top bar and host head ---------------------------------------- */
+
+  function paintHead() {
+    if (!daemonUp) {
+      topDot.dataset.state = "off";
+      topText.textContent = "The daemon is not answering";
+      topCount.textContent = "";
+      return;
+    }
+    if (!selected) {
+      topDot.dataset.state = "off";
+      topText.textContent = "No hosts yet";
+      topCount.textContent = "";
+      return;
+    }
+
+    var st = hostState(selected);
+    var n = rowsOn(selected).length;
+    topDot.dataset.state = st;
+    topText.textContent = selected + (st === "up" ? " is connected"
+      : st === "retry" ? " is reconnecting" : " is not connected");
+    topCount.textContent = n ? plural(n, "mapping", "mappings") : "no mappings";
+
+    var h = bookEntry(selected) || {};
+    hostNameEl.textContent = selected;
+    var parts = [];
+    if (h.hostname && h.hostname !== selected) {
+      parts.push((h.user ? h.user + "@" : "") + h.hostname);
+    }
+    if (st === "up") parts.push("connected");
+    else if (st === "retry") {
+      var rt = retryText(selected);
+      parts.push("reconnecting" + (rt ? ", " + rt : ""));
+    } else parts.push("not connected yet; it connects when you add a mapping or discover ports");
+    hostInfoEl.textContent = parts.join(", ");
+    var le = (hostHealth[selected] || {}).last_error;
+    hostInfoEl.title = st === "retry" && le ? String(le) : "";
+
+    // Only a host typed in here can be taken out again; the rest come from config.
+    hostRemove.classList.toggle("hidden", h.source !== "manual");
+    hostRemove.setAttribute("aria-label", "Remove host " + selected);
   }
 
   /* ---- rows ---------------------------------------------------------- */
 
   function buildRow() {
-    var li = el("li", "cable");
+    var li = el("li", "row grid5");
+    li.tabIndex = -1;
 
-    var line = el("div", "line");
-    var gauge = el("span", "gauge");
-    var portL = el("span", "port l");
-    var spacer = el("span", "spacer");
-    var head = el("span", "head");
-    head.setAttribute("aria-hidden", "true");
-    var portR = document.createElement("a");
-    portR.className = "port r";
-    portR.target = "_blank";
-    portR.rel = "noopener noreferrer";
+    var chipL = el("div", "pchip l");
+    var numL = el("div", "pnum");
+    var subL = el("div", "psub");
+    chipL.append(numL, subL);
 
-    line.append(gauge, portL, spacer, head, portR);
+    var wire = wireCell();
 
-    var btns = el("span", "rowbtns");
-    var edit = el("button", "rowbtn edit");
-    edit.type = "button";
-    edit.appendChild(pencil());
-    var pull = el("button", "rowbtn pull", "×");
-    pull.type = "button";
-    btns.append(edit, pull);
+    var chipR = el("div", "pchip r");
+    var numR = el("div", "pnum");
+    chipR.append(numR, el("div", "psub", "on this Mac"));
 
-    var meta = el("div", "meta");
-    var who = el("div", "who");
-    var pinmark = el("span", "pinmark hidden");
-    pinmark.appendChild(pinIcon());
-    var dir = el("span", "dir");
-    var tag = el("span", "tag");
-    who.append(pinmark, dir, tag);
-    var times = el("div", "times");
-    var note = el("span", "note");
-    var age = el("span", "age");
-    var expiry = el("span", "expiry");
-    times.append(note, age, expiry);
-    var tail = el("div", "tail");
-    tail.append(times, btns);
-    meta.append(who, tail);
+    var info = el("div", "info");
+    var line1 = el("div", "line1");
+    var label = el("span", "label");
+    var pin = el("span", "pin hidden");
+    pin.append(icon("pin", 13), document.createTextNode("pinned"));
+    line1.append(label, pin);
+    var state = el("div", "state");
+    var sdot = el("span", "dot sm");
+    var stext = el("span", "stext");
+    state.append(sdot, stext);
+    var note = el("div", "note hidden");
+    info.append(line1, state, note);
 
-    li.append(line, meta);
+    var acts = el("div", "acts");
+    var open = document.createElement("a");
+    open.className = "iconbtn line";
+    open.target = "_blank";
+    open.rel = "noopener noreferrer";
+    open.appendChild(icon("ext", 14));
+    var spacer = el("span", "iconspacer");
+    var more = el("button", "iconbtn");
+    more.type = "button";
+    more.setAttribute("aria-haspopup", "menu");
+    more.setAttribute("aria-expanded", "false");
+    more.appendChild(icon("more", 16));
+    acts.append(open, spacer, more);
+
+    li.append(chipL, wire, chipR, info, acts);
 
     var refs = {
-      li: li, line: line, gauge: gauge, portL: portL, portR: portR, head: head,
-      edit: edit, pull: pull, dir: dir, tag: tag, age: age, expiry: expiry,
-      pinmark: pinmark, note: note, editForm: null
+      li: li, wire: wire, numL: numL, subL: subL, numR: numR,
+      label: label, pin: pin, sdot: sdot, stext: stext, state: state, note: note,
+      open: open, spacer: spacer, more: more, data: null
     };
-
-    pull.addEventListener("click", function () { removeForward(refs); });
-    edit.addEventListener("click", function () {
-      if (refs.editForm) closeEdit(refs);
-      else openEdit(refs);
+    more.addEventListener("click", function () {
+      if (menuRefs === refs) closeMenu();
+      else openMenu(refs);
     });
     return refs;
   }
 
-  // The rails carry machine identity, so a port is normally just its number. When
-  // several hosts are in play the left rail can no longer stand for one machine,
-  // so the host comes back onto the row.
-  function paintRow(refs, r, showHost) {
+  function paintRow(refs, r) {
     refs.data = r;
-
-    var dead = r.state === "dead";
-    var waiting = r.state === "reconnecting";
     var dir = dirOf(r);
-    refs.li.dataset.state = dead ? "dead" : (waiting ? "reconnecting" : "alive");
-    refs.li.dataset.dir = dir;
-
     var host = hostOf(r);
     var target = targetOf(r);
     var rport = num(r.remote_port);
     var lport = num(r.local_port);
+    var pinned = r.pinned === true;
+    var st = r.state === "dead" ? "dead" : (r.state === "reconnecting" ? "reconnecting" : "alive");
 
-    // A target host always drags the remote host in with it: "db:5432" alone would not
-    // say which box db is reachable from, and that is the whole point of the mapping.
-    var remoteTx = ((showHost || target) ? host + ":" : "") +
-      (target ? target + ":" : "") + (rport != null ? rport : "?");
-    var localTx = lport != null ? String(lport) : "?";
+    refs.li.dataset.dir = dir;
+    refs.li.dataset.state = st;
+    refs.wire.dataset.dir = dir;
 
-    refs.portL.textContent = remoteTx;
-    refs.portR.textContent = localTx;
-    refs.portL.title = host + ":" + (target ? target + ":" : "") +
-      (rport != null ? rport : "?") +
-      (target ? "  — reached through " + host : "") +
-      (r.requester ? "  — added by " + r.requester : "");
+    refs.numL.textContent = ":" + (rport != null ? rport : "?");
+    refs.subL.textContent = target ? "on " + target + ", via " + host : "on " + host;
+    refs.subL.title = target ? target + " as reached from " + host : "";
+    refs.numR.textContent = ":" + (lport != null ? lport : "?");
+
+    var name = r.label ? String(r.label) : "";
+    refs.label.textContent = name || (dir === REMOTE_FWD ? "Remote-forward" : "Local-forward");
+    refs.label.classList.toggle("none", !name);
+    refs.pin.classList.toggle("hidden", !pinned);
+    refs.pin.title = pinned ? "Re-created after the daemon or the Mac restarts" : "";
+
+    // The state line: alive, how long it has left, or why it is not.
+    var dotState = "up", text, warn = false;
+    var ttl = num(r.ttl), left = num(r.expires_in);
+    if (st === "reconnecting") {
+      dotState = "retry";
+      warn = true;
+      var rt = retryText(host);
+      text = "reconnecting" + (rt ? ", " + rt : "");
+      var le = (hostHealth[host] || {}).last_error;
+      refs.state.title = le ? String(le) : "";
+    } else if (st === "dead") {
+      dotState = "off";
+      text = "not answering";
+      refs.state.title = "The daemon no longer sees this mapping's listener";
+    } else {
+      if (pinned || ttl === 0) text = "alive, no expiry";
+      else if (ttl != null && ttl > 0 && left != null) {
+        text = "alive, expires in " + duration(left);
+        warn = left < 900;
+      } else text = "alive";
+      var age = num(r.age);
+      refs.state.title = (age != null ? "Added " + duration(age) + " ago" : "") +
+        (r.requester ? " by " + r.requester : "");
+    }
+    refs.sdot.dataset.state = dotState;
+    refs.stext.textContent = text;
+    refs.state.classList.toggle("warn", warn);
+
+    var note = "";
+    if (dir === REMOTE_FWD) note = "A service on this Mac, reachable from " + host;
+    else if (rport != null && lport != null && rport !== lport) {
+      note = rport + " was taken on this Mac, or a different port was asked for";
+    }
+    refs.note.textContent = note;
+    refs.note.classList.toggle("hidden", !note);
 
     var href = safeUrl(r);
+    var who = name || ":" + (lport != null ? lport : rport);
     if (href) {
-      refs.portR.href = href;
-      refs.portR.title = "Open " + href;
-    } else {
-      refs.portR.removeAttribute("href");
-      refs.portR.title = dir === REMOTE_FWD
-        ? "Published to " + host + " — nothing to open here"
-        : "";
+      refs.open.href = href;
+      refs.open.setAttribute("aria-label", "Open :" + lport + " in the browser");
+      refs.open.title = "Open " + href;
     }
-
-    refs.dir.textContent = dir;
-    refs.edit.setAttribute("aria-label", "Edit mapping " + keyOf(r));
-    refs.edit.title = "Edit this mapping";
-    refs.pull.setAttribute("aria-label", "Remove mapping " + keyOf(r));
-    refs.pull.title = "Remove this mapping";
-
-    refs.tag.textContent = r.label ? String(r.label) : "";
-
-    var pinned = r.pinned === true;
-    refs.pinmark.classList.toggle("hidden", !pinned);
-    refs.pinmark.title = pinned
-      ? "Pinned: this mapping is re-created after a daemon restart"
-      : "";
-
-    // A reconnecting row explains itself, because "why is this yellow" has a real
-    // answer the daemon already knows: which attempt it is on, and when the next one is.
-    if (waiting) {
-      var h = hostHealth[host] || {};
-      var txt = "reconnecting";
-      if (num(h.attempts)) txt += ", attempt " + h.attempts;
-      if (num(h.next_retry_in)) txt += ", next try in " + duration(h.next_retry_in);
-      refs.note.textContent = txt;
-      refs.note.title = h.last_error ? String(h.last_error) : "";
-    } else {
-      refs.note.textContent = "";
-      refs.note.title = "";
-    }
-
-    var age = num(r.age);
-    refs.age.textContent = age != null ? duration(age) + " old" : "";
-    refs.age.title = age != null ? "Patched " + duration(age) + " ago" : "";
-
-    var ttl = num(r.ttl), left = num(r.expires_in);
-    var frac = 1;
-    if (pinned) {
-      // Where the lease would be. A pin is the answer to "when does this go away",
-      // and the answer is that it does not.
-      refs.expiry.textContent = "pinned";
-      refs.expiry.title = "Kept across restarts; no expiry";
-      refs.expiry.dataset.pinned = "1";
-      refs.expiry.removeAttribute("data-soon");
-      frac = dead || waiting ? 0 : 1;
-    } else if (dead) {
-      // A dead mapping has no lease left to count down; showing one contradicts
-      // the struck-through endpoints right above it.
-      refs.expiry.textContent = "";
-      refs.expiry.title = "";
-      refs.expiry.removeAttribute("data-soon");
-      refs.expiry.removeAttribute("data-pinned");
-      frac = 0;
-    } else if (ttl === 0) {
-      refs.expiry.textContent = "—";
-      refs.expiry.title = "No expiry";
-      refs.expiry.removeAttribute("data-soon");
-      refs.expiry.removeAttribute("data-pinned");
-    } else if (ttl != null && ttl > 0 && left != null) {
-      refs.expiry.textContent = duration(left) + " left";
-      refs.expiry.title = "Expires in " + duration(left);
-      // A dead mapping is already gone; counting it down would contradict that.
-      if (left < 900 && !dead) refs.expiry.dataset.soon = "1";
-      else refs.expiry.removeAttribute("data-soon");
-      refs.expiry.removeAttribute("data-pinned");
-      frac = Math.max(0, Math.min(1, left / ttl));
-    } else {
-      refs.expiry.textContent = "";
-      refs.expiry.title = "";
-      refs.expiry.removeAttribute("data-soon");
-      refs.expiry.removeAttribute("data-pinned");
-    }
-
-    // The gauge is anchored at the origin rail and spans toward the destination.
-    var pct = dead ? 0 : (frac * 100).toFixed(2);
-    refs.gauge.style.width = pct + "%";
-    if (dir === REMOTE_FWD) {
-      refs.gauge.style.right = "0";
-      refs.gauge.style.left = "auto";
-    } else {
-      refs.gauge.style.left = "0";
-      refs.gauge.style.right = "auto";
-    }
+    refs.open.classList.toggle("hidden", !href);
+    refs.spacer.classList.toggle("hidden", !!href);
+    refs.more.setAttribute("aria-label", "More actions for " + who);
   }
 
-  /* ---- edit / delete ------------------------------------------------- */
-
-  function field(cls, labelText, value) {
-    var wrap = el("label", "f " + cls);
-    wrap.appendChild(el("span", null, labelText));
-    var input = document.createElement("input");
-    input.type = "text";
-    input.autocomplete = "off";
-    input.value = value != null ? String(value) : "";
-    wrap.appendChild(input);
-    return { wrap: wrap, input: input };
-  }
-
-  function openEdit(refs) {
-    if (refs.editForm) return;
-    var r = refs.data || {};
-
-    var form = document.createElement("form");
-    form.className = "edit-panel";
-
-    var fields = el("div", "fields");
-    var fLabel  = field("f-label", "label", r.label || "");
-    var fTtl    = field("f-ttl", "ttl secs", num(r.ttl) != null ? r.ttl : "");
-    var fLocal  = field("f-port", "local port", num(r.local_port));
-    var fRemote = field("f-port", "remote port", num(r.remote_port));
-    fields.append(fLabel.wrap, fTtl.wrap, fLocal.wrap, fRemote.wrap);
-
-    // Editing a range is not offered: the members are independent mappings with their
-    // own ids, and a "range" no longer exists once they are made.
-    var fTarget = null;
-    if (dirOf(r) === LOCAL_FWD) {
-      fTarget = field("f-target", "target host", targetOf(r));
-      fTarget.input.placeholder = "localhost";
-      fields.appendChild(fTarget.wrap);
-    }
-
-    var pinWrap = el("label", "check");
-    var pinIn = document.createElement("input");
-    pinIn.type = "checkbox";
-    pinIn.checked = r.pinned === true;
-    pinWrap.append(pinIn, el("span", null, "keep across restarts"));
-
-    var actions = el("div", "actions");
-    var save = el("button", "primary", "Save changes");
-    save.type = "submit";
-    var cancel = el("button", "ghost", "Cancel");
-    cancel.type = "button";
-    actions.append(save, cancel);
-
-    var err = el("p", "err hidden");
-    err.setAttribute("role", "alert");
-
-    form.append(fields, pinWrap, actions, err);
-    refs.li.appendChild(form);
-    refs.editForm = form;
-    refs.edit.setAttribute("aria-expanded", "true");
-    fLabel.input.focus();
-
-    cancel.addEventListener("click", function () { closeEdit(refs); });
-
-    form.addEventListener("submit", function (ev) {
-      ev.preventDefault();
-      clearErr(err);
-
-      var cur = refs.data || {};
-      var patch = {};
-
-      var newLabel = fLabel.input.value.trim();
-      if (newLabel !== (cur.label || "")) patch.label = newLabel;
-
-      var rawTtl = fTtl.input.value.trim();
-      if (rawTtl) {
-        if (!/^\d+$/.test(rawTtl)) { showErr(err, "TTL must be a whole number of seconds."); return; }
-        var ttl = parseInt(rawTtl, 10);
-        if (ttl !== num(cur.ttl)) patch.ttl = ttl;
-      }
-
-      var rawLocal = fLocal.input.value.trim();
-      if (rawLocal) {
-        var lp = portValue(rawLocal);
-        if (lp == null) { showErr(err, "Local port must be between 1024 and 65535."); return; }
-        if (lp !== num(cur.local_port)) patch.local_port = lp;
-      }
-
-      var rawRemote = fRemote.input.value.trim();
-      if (rawRemote) {
-        var rp = portValue(rawRemote);
-        if (rp == null) { showErr(err, "Remote port must be between 1024 and 65535."); return; }
-        if (rp !== num(cur.remote_port)) patch.remote_port = rp;
-      }
-
-      if (fTarget) {
-        var rawTarget = fTarget.input.value.trim();
-        if (rawTarget && !safeTarget(rawTarget)) {
-          showErr(err, "Target host may contain only letters, digits, dot, dash and underscore.");
-          return;
-        }
-        if (rawTarget !== targetOf(cur)) patch.remote_host = rawTarget;
-      }
-
-      if (pinIn.checked !== (cur.pinned === true)) patch.pinned = pinIn.checked;
-
-      if (!Object.keys(patch).length) { closeEdit(refs); return; }
-
-      api("PATCH", API + "/forward/" + idPath(keyOf(cur)), patch).then(function () {
-        closeEdit(refs);
-        schedule(true);
-      }).catch(function (e) {
-        showErr(err, e && e.message ? e.message : "The daemon rejected that change.");
-      });
-    });
-  }
-
-  function closeEdit(refs) {
-    if (!refs.editForm) return;
-    refs.editForm.remove();
-    refs.editForm = null;
-    refs.edit.removeAttribute("aria-expanded");
-  }
-
-  function removeForward(refs) {
-    var r = refs.data;
-    if (!r) return;
-    refs.pull.disabled = true;
-    // Retract the cable straight away: the motion answers the click, and the poll
-    // that follows removes the row for real.
-    refs.li.classList.add("pulling");
-    api("DELETE", API + "/forward/" + idPath(keyOf(r)))
-      .catch(function (err) {
-        refs.li.classList.remove("pulling");
-        flash("error", [err && err.message ? err.message : "Could not remove that mapping."]);
-      })
-      .then(function () {
-        refs.pull.disabled = false;
-        schedule(true);
-      });
-  }
-
-  /* ---- discovery ----------------------------------------------------- */
-
-  // Addresses that mean "the remote's own loopback", which is what a mapping with no
-  // target host already reaches. Anything else is a specific interface and has to be
-  // named on the forward to be reachable at all.
-  var WILDCARD = {
-    "": 1, "0.0.0.0": 1, "*": 1, "::": 1, "127.0.0.1": 1, "::1": 1, "localhost": 1
-  };
-
-  var probing = false;
-
-  function setProbeNote(msg, bad) {
-    probeNote.textContent = msg || "";
-    probeNote.classList.toggle("bad", !!bad);
-    probeNote.classList.toggle("hidden", !msg);
-  }
-
-  function runProbe() {
-    var alias = probeHost.value;
-    if (!alias || probing) return;
-    probing = true;
-    probeRun.disabled = true;
-    probeRun.textContent = "looking…";
-    setProbeNote("", false);
-
-    api("GET", API + "/hosts/" + encodeURIComponent(alias) + "/listeners")
-      .then(function (res) {
-        paintProbe(alias, (res && Array.isArray(res.listeners)) ? res.listeners : []);
-      })
-      .catch(function (err) {
-        probeTable.classList.add("hidden");
-        setProbeNote(err && err.message
-          ? err.message
-          : "Could not ask that host what it is listening on.", true);
-      })
-      .then(function () {
-        probing = false;
-        probeRun.disabled = false;
-        probeRun.textContent = "refresh";
-      });
-  }
-
-  function cell(text, cls) {
-    var td = document.createElement("td");
-    if (cls) td.className = cls;
-    td.textContent = text;
-    return td;
-  }
-
-  function paintProbe(alias, rows) {
-    probeRows.textContent = "";
-
-    if (!rows.length) {
-      probeTable.classList.add("hidden");
-      setProbeNote("Nothing listening on " + alias + " — or neither ss nor netstat is installed there.", false);
-      return;
-    }
-
-    rows.forEach(function (e) {
-      var tr = document.createElement("tr");
-      if (e.forwarded) tr.dataset.forwarded = "1";
-      tr.append(cell(String(e.port)), cell(e.address || "", "addr"));
-
-      var what = document.createElement("td");
-      what.className = "what";
-      if (e.container) {
-        what.appendChild(el("span", "ctr", e.container));
-        if (e.process) what.appendChild(document.createTextNode(" · " + e.process));
-      } else {
-        what.textContent = e.process || "—";
-      }
-      if (e.pid) what.title = "pid " + e.pid;
-      tr.appendChild(what);
-
-      var act = document.createElement("td");
-      if (e.forwarded) {
-        // Marked, not hidden: leaving the operator to wonder where a port went is
-        // worse than one row saying it is already patched.
-        var done = el("span", "already", "patched");
-        var href = safeUrl({ url: e.url, direction: LOCAL_FWD });
-        if (href) {
-          done.textContent = "";
-          var a = document.createElement("a");
-          a.href = href;
-          a.target = "_blank";
-          a.rel = "noopener noreferrer";
-          a.textContent = "patched";
-          a.title = "Open " + href;
-          done.appendChild(a);
-        }
-        act.appendChild(done);
-      } else {
-        var b = el("button", "fwdbtn", "Forward");
-        b.type = "button";
-        b.addEventListener("click", function () { prefillFrom(alias, e); });
-        act.appendChild(b);
-      }
-      tr.appendChild(act);
-      probeRows.appendChild(tr);
-    });
-
-    probeTable.classList.remove("hidden");
-    setProbeNote(rows.length + " listening on " + alias + ".", false);
-  }
-
-  // Forward opens the add form filled in rather than creating the mapping outright:
-  // the local port, the label and the lease are still decisions, and a button that
-  // silently patches something is a button people stop trusting.
-  function prefillFrom(alias, e) {
-    openAdd(alias);
-    addForm.elements["direction"].value = LOCAL_FWD;
-    syncDir();
-    if (hostSel.value !== alias) {
-      paintHosts(alias);
-      hostSel.value = alias;
-      syncHostNote();
-    }
-    addForm.elements["remote_port"].value = String(e.port);
-    addForm.elements["local_port"].value = "";
-    addForm.elements["label"].value = e.container || e.process || "";
-    // A wildcard or loopback listener is reached through the remote's own localhost,
-    // which is the default; anything else has to be named.
-    addForm.elements["remote_host"].value = WILDCARD[e.address] ? "" : String(e.address || "");
-    addForm.elements["local_port"].focus();
-  }
-
-  probeRun.addEventListener("click", runProbe);
-  probeHost.addEventListener("change", function () {
-    // The table described a different machine a moment ago.
-    probeRows.textContent = "";
-    probeTable.classList.add("hidden");
-    setProbeNote("", false);
-  });
-
-  /* ---- render -------------------------------------------------------- */
-
-  function render(rows) {
+  function renderRows() {
+    var rows = rowsOn(selected);
     var seen = new Set();
     var keys = [];
-
-    // One host means the left rail can name it and the rows can drop it.
-    var hosts = new Set();
-    rows.forEach(function (r) { hosts.add(hostOf(r)); });
-    var showHost = hosts.size > 1;
-    capRemote.textContent = hosts.size === 1 ? Array.from(hosts)[0] : "remote";
 
     rows.forEach(function (r, i) {
       var k = keyOf(r);
@@ -1790,31 +1387,16 @@
         refs = buildRow();
         rowsByKey.set(k, refs);
         listEl.appendChild(refs.li);
-        // One orchestrated moment: on the first painted list the cables patch in
-        // across the bay in sequence. A row added later just draws on its own.
-        if (firstPaint) {
-          var delay = Math.min(i, 8) * 45;
-          refs.gauge.style.animationDelay = delay + "ms";
-          refs.portL.style.animationDelay = delay + "ms";
-          refs.portR.style.animationDelay = delay + "ms";
-          refs.head.style.animationDelay = delay + "ms";
-        }
         refs.li.classList.add("enter");
-        // Not animationend: under reduced motion the animation never runs and the
-        // event would never fire, leaving the class stuck on every row.
-        setTimeout(function () {
-          refs.li.classList.remove("enter");
-          refs.gauge.style.animationDelay = "";
-          refs.portL.style.animationDelay = "";
-          refs.portR.style.animationDelay = "";
-          refs.head.style.animationDelay = "";
-        }, 900);
+        // Not animationend: under reduced motion it never fires.
+        setTimeout(function () { refs.li.classList.remove("enter"); }, 600);
       }
-      paintRow(refs, r, showHost);
+      paintRow(refs, r);
     });
 
     rowsByKey.forEach(function (refs, k) {
       if (!seen.has(k)) {
+        if (menuRefs === refs) closeMenu();
         refs.li.remove();
         rowsByKey.delete(k);
       }
@@ -1823,93 +1405,703 @@
     // keep DOM order matching payload order without rebuilding rows
     keys.forEach(function (k, i) {
       var refs = rowsByKey.get(k);
-      if (refs && listEl.children[i] !== refs.li) listEl.appendChild(refs.li);
+      if (refs && listEl.children[i] !== refs.li) listEl.insertBefore(refs.li, listEl.children[i] || null);
     });
 
-    firstPaint = false;
-
-    var dead = rows.filter(function (r) { return r.state === "dead"; }).length;
-    var waiting = rows.filter(function (r) { return r.state === "reconnecting"; }).length;
-    var live = rows.length - dead - waiting;
-    // The daemon answered, so the link to IT is up; a reconnecting host is a different
-    // statement and belongs in the count, not in the dot.
-    summaryEl.dataset.link = "up";
-    summaryTx.textContent = rows.length === 0
-      ? "connected"
-      : live + " patched" +
-        (waiting ? ", " + waiting + " reconnecting" : "") +
-        (dead ? ", " + dead + " dead" : "");
-
+    legendHost.textContent = selected;
+    tableWrap.classList.toggle("hidden", rows.length === 0);
     emptyEl.classList.toggle("hidden", rows.length !== 0);
-    downEl.classList.add("hidden");
-    footEl.classList.remove("hidden");
-    document.getElementById("probe").classList.remove("hidden");
+    emptyTitle.textContent = "Nothing is mapped on " + selected + " yet.";
+    emptyText.textContent = "Add a mapping by port, or look at what " + selected +
+      " is listening on and forward one from the list. A mapping you keep across restarts comes back on its own.";
+    emptyChip.textContent = "on " + selected;
+    emptyDiscT.textContent = "Discover ports on " + selected;
   }
 
-  function renderDown() {
-    rowsByKey.forEach(function (refs) { refs.li.remove(); });
-    rowsByKey.clear();
-    firstPaint = true;
-    summaryEl.dataset.link = "down";
-    summaryTx.textContent = "not connected";
-    emptyEl.classList.add("hidden");
-    downEl.classList.remove("hidden");
-    // Patching cannot succeed while the daemon is unreachable; offering it anyway
-    // would only produce a confusing failure.
-    closeAdd();
-    footEl.classList.add("hidden");
-    // Discovery needs the daemon to reach the other machine for us.
-    document.getElementById("probe").classList.add("hidden");
+  function renderAll() {
+    paintHead();
+    paintSidebar();
+    if (!daemonUp) {
+      downEl.classList.remove("hidden");
+      noHostsEl.classList.add("hidden");
+      hostView.classList.add("hidden");
+      probeEl.classList.add("hidden");
+      return;
+    }
+    downEl.classList.add("hidden");
+    if (!loadedOnce) {
+      // Until the first poll answers, "nothing mapped" would be a guess.
+      noHostsEl.classList.add("hidden");
+      hostView.classList.add("hidden");
+      probeEl.classList.add("hidden");
+      return;
+    }
+    var none = !selected;
+    noHostsEl.classList.toggle("hidden", !none);
+    hostView.classList.toggle("hidden", none);
+    probeEl.classList.toggle("hidden", none);
+    if (none) return;
+    hostNameEl.textContent = selected;
+    renderRows();
+    paintProbe(false);
   }
+
+  /* ---- more menu ----------------------------------------------------- */
+
+  function openMenu(refs) {
+    closeMenu();
+    var r = refs.data || {};
+    menuRefs = refs;
+    menuOpener = refs.more;
+    menuPin.textContent = r.pinned === true ? "Stop keeping across restarts" : "Keep across restarts";
+    menuEl.classList.remove("hidden");
+    var b = refs.more.getBoundingClientRect();
+    var w = menuEl.offsetWidth, h = menuEl.offsetHeight;
+    var left = Math.max(8, Math.min(window.innerWidth - w - 8, b.right - w));
+    var top = b.bottom + 4;
+    if (top + h > window.innerHeight - 8) top = Math.max(8, b.top - h - 4);
+    menuEl.style.left = left + "px";
+    menuEl.style.top = top + "px";
+    refs.more.setAttribute("aria-expanded", "true");
+    menuEdit.focus();
+  }
+
+  function closeMenu(returnFocus) {
+    if (!menuRefs) return;
+    menuRefs.more.setAttribute("aria-expanded", "false");
+    menuEl.classList.add("hidden");
+    var opener = menuOpener;
+    menuRefs = null;
+    menuOpener = null;
+    if (returnFocus && opener) opener.focus();
+  }
+
+  menuEl.addEventListener("keydown", function (ev) {
+    var items = Array.prototype.slice.call(menuEl.querySelectorAll("button"));
+    var i = items.indexOf(document.activeElement);
+    if (ev.key === "Escape") { ev.preventDefault(); closeMenu(true); }
+    else if (ev.key === "ArrowDown") { ev.preventDefault(); items[(i + 1) % items.length].focus(); }
+    else if (ev.key === "ArrowUp") { ev.preventDefault(); items[(i - 1 + items.length) % items.length].focus(); }
+    else if (ev.key === "Tab") closeMenu(false);
+  });
+  document.addEventListener("mousedown", function (ev) {
+    if (menuRefs && !menuEl.contains(ev.target) && !menuRefs.more.contains(ev.target)) closeMenu(false);
+  });
+  window.addEventListener("resize", function () { closeMenu(false); });
+  window.addEventListener("scroll", function () { closeMenu(false); }, true);
+
+  menuEdit.addEventListener("click", function () {
+    var refs = menuRefs;
+    closeMenu(false);
+    if (refs) openSheet("edit", refs, null, refs.more);
+  });
+
+  menuPin.addEventListener("click", function () {
+    var refs = menuRefs;
+    closeMenu(true);
+    if (!refs || !refs.data) return;
+    var want = refs.data.pinned !== true;
+    api("PATCH", API + "/forward/" + idPath(keyOf(refs.data)), { pinned: want }).then(function () {
+      schedule(true);
+    }).catch(function (err) {
+      flash("error", msgOf(err, "The daemon rejected that change."));
+    });
+  });
+
+  menuClose.addEventListener("click", function () {
+    var refs = menuRefs;
+    closeMenu(false);
+    if (refs) removeForward(refs);
+  });
+
+  function removeForward(refs) {
+    var r = refs.data;
+    if (!r) return;
+    refs.more.disabled = true;
+    refs.li.classList.add("closing");
+    api("DELETE", API + "/forward/" + idPath(keyOf(r)))
+      .catch(function (err) {
+        refs.li.classList.remove("closing");
+        flash("error", msgOf(err, "Could not close that mapping."));
+      })
+      .then(function () {
+        refs.more.disabled = false;
+        schedule(true);
+      });
+  }
+
+  /* ---- the sheet ----------------------------------------------------- */
+
+  function currentDir() {
+    return addForm.elements["direction"].value === REMOTE_FWD ? REMOTE_FWD : LOCAL_FWD;
+  }
+
+  function setRadio(name, value) {
+    Array.prototype.forEach.call(addForm.elements[name], function (r) {
+      r.checked = value != null && r.value === String(value);
+    });
+  }
+
+  function syncSheet() {
+    var dir = currentDir();
+    var host = sheetHost();
+    var edit = sheetMode === "edit";
+    addForm.dataset.dir = dir;
+
+    dirHint.textContent = dir === LOCAL_FWD
+      ? "A port on " + host + " appears on this Mac."
+      : "A port on this Mac appears on " + host + ".";
+    targetName.textContent = host;
+
+    if (dir === LOCAL_FWD) {
+      targetWrap.classList.remove("hidden");
+      localIn.placeholder = edit ? "" : "same as remote";
+      localHint.textContent = edit
+        ? "must be free on this Mac"
+        : "if it is taken here, a free port is used instead";
+    } else {
+      // The target of a remote-forward is this Mac, which is always localhost.
+      targetWrap.classList.add("hidden");
+      targetIn.value = "";
+      localIn.placeholder = "3000";
+      localHint.textContent = "the port the service listens on here";
+    }
+    remoteHint.textContent = edit ? "one port" : "or a range, like 8000-8010";
+
+    // Nothing to open for a remote-forward: the listener ends up on the remote host.
+    var canOpen = dir === LOCAL_FWD && !edit;
+    openWrap.classList.toggle("hidden", !canOpen);
+    openBox.disabled = !canOpen;
+    if (!canOpen) openBox.checked = false;
+
+    // A pin and a lease are contradictory; the daemon drops the lease, so say so.
+    Array.prototype.forEach.call(addForm.elements["ttl"], function (r) { r.disabled = pinBox.checked; });
+
+    syncMini();
+  }
+
+  function syncMini() {
+    var dir = currentDir();
+    var host = sheetHost();
+    var rp = remoteIn.value.trim();
+    var lp = localIn.value.trim();
+    var tgt = dir === LOCAL_FWD ? targetIn.value.trim() : "";
+    miniEl.dataset.dir = dir;
+    miniWire.dataset.dir = dir;
+    miniLPort.textContent = ":" + (rp || " ");
+    miniLSub.textContent = tgt ? "on " + tgt + ", via " + host : "on " + host;
+    miniRPort.textContent = ":" + (lp || (dir === LOCAL_FWD ? rp : "") || " ");
+  }
+
+  function sheetHost() {
+    if (sheetMode === "edit" && editRefs && editRefs.data) return hostOf(editRefs.data);
+    return selected || "the host";
+  }
+
+  function openSheet(mode, refs, prefill, opener) {
+    if (!daemonUp) { flash("error", "The daemon is not answering, so nothing can be added right now."); return; }
+    if (mode === "add" && !selected) { flash("error", "Add a host first."); return; }
+
+    sheetMode = mode;
+    editRefs = mode === "edit" ? refs : null;
+    sheetOpener = opener || document.activeElement;
+    addForm.reset();
+    clearErr(addErr);
+    ttlNote.classList.add("hidden");
+
+    if (mode === "edit") {
+      var r = refs.data || {};
+      sheetTitle.textContent = "Edit mapping";
+      addSubmit.textContent = "Save changes";
+      dirField.classList.add("hidden");
+      setRadio("direction", dirOf(r));
+      remoteIn.value = num(r.remote_port) != null ? String(r.remote_port) : "";
+      localIn.value = num(r.local_port) != null ? String(r.local_port) : "";
+      targetIn.value = targetOf(r);
+      labelIn.value = r.label || "";
+      pinBox.checked = r.pinned === true;
+      // Preselect the preset the lease already matches, if any; nothing is sent
+      // unless the choice changes.
+      var ttl = num(r.ttl);
+      setRadio("ttl", (ttl === 3600 || ttl === 28800 || ttl === 86400 || ttl === 0) ? ttl : null);
+      var left = num(r.expires_in);
+      ttlNote.textContent = r.pinned === true ? "Pinned, so it does not expire."
+        : ttl === 0 ? "Right now it does not expire."
+        : left != null ? "Right now it expires in " + duration(left) + ". A new choice counts from when it was added."
+        : "";
+      ttlNote.classList.toggle("hidden", !ttlNote.textContent);
+    } else {
+      sheetTitle.textContent = "Add mapping";
+      addSubmit.textContent = "Add mapping";
+      dirField.classList.remove("hidden");
+      setRadio("direction", LOCAL_FWD);
+      setRadio("ttl", TTL_DEFAULT);
+      if (prefill) {
+        remoteIn.value = prefill.port != null ? String(prefill.port) : "";
+        labelIn.value = prefill.label || "";
+        targetIn.value = prefill.target || "";
+      }
+    }
+    syncSheet();
+
+    if (typeof sheet.showModal === "function") {
+      if (!sheet.open) sheet.showModal();
+    } else {
+      sheet.classList.add("fallback");
+      sheet.setAttribute("open", "");
+    }
+
+    var first = prefill ? localIn
+      : mode === "edit" ? labelIn
+      : remoteIn;
+    first.focus();
+  }
+
+  // Everything that closes the sheet (Cancel, Escape, a save) comes through here. The
+  // tidy-up runs inline rather than on the dialog's close event, which a background tab
+  // may not deliver until it is shown again.
+  function closeSheet() {
+    if (!sheet.open && !sheet.hasAttribute("open")) return;
+    if (typeof sheet.close === "function") sheet.close();
+    else sheet.removeAttribute("open");
+    afterSheet();
+  }
+
+  sheet.addEventListener("cancel", function (ev) {
+    ev.preventDefault();
+    closeSheet();
+  });
+
+  function afterSheet() {
+    clearErr(addErr);
+    editRefs = null;
+    if (location.hash === "#add") {
+      try { history.replaceState(null, "", location.pathname + location.search); } catch (e) { /* ignore */ }
+    }
+    var o = sheetOpener;
+    sheetOpener = null;
+    if (o && document.contains(o) && typeof o.focus === "function") o.focus();
+  }
+
+  addCancel.addEventListener("click", closeSheet);
+
+  Array.prototype.forEach.call(addForm.elements["direction"], function (radio) {
+    radio.addEventListener("change", syncSheet);
+  });
+  pinBox.addEventListener("change", syncSheet);
+  [remoteIn, localIn, targetIn].forEach(function (i) { i.addEventListener("input", syncMini); });
+
+  addOpenBtn.addEventListener("click", function () { openSheet("add", null, null, addOpenBtn); });
+  emptyAdd.addEventListener("click", function () { openSheet("add", null, null, emptyAdd); });
+
+  addForm.addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    clearErr(addErr);
+    if (sheetMode === "edit") submitEdit();
+    else submitAdd();
+  });
+
+  function submitAdd() {
+    var dir = currentDir();
+    var host = selected;
+    var rawRemote = remoteIn.value.trim();
+    var rawLocal = localIn.value.trim();
+
+    if (!host) { showErr(addErr, "Pick a host, or add one first."); return; }
+
+    var remote = portRange(rawRemote);
+    if (remote == null) {
+      showErr(addErr, "Remote port must be a whole number between 1024 and 65535, or a range like 8000-8010.");
+      remoteIn.focus();
+      return;
+    }
+
+    var body = {
+      direction: dir,
+      host: host,
+      remote_port: remote.start,
+      label: labelIn.value.trim(),
+      open: !openBox.disabled && openBox.checked,
+      pinned: pinBox.checked,
+      requester: "console"
+    };
+    if (remote.ranged) body.remote_port_end = remote.end;
+
+    var rawTarget = targetIn.value.trim();
+    if (rawTarget && dir === LOCAL_FWD) {
+      if (!safeTarget(rawTarget)) {
+        showErr(addErr, "Target host may contain only letters, digits, dots, dashes and underscores; no colons, so no IPv6 literals.");
+        targetIn.focus();
+        return;
+      }
+      body.remote_host = rawTarget;
+    }
+
+    if (rawLocal) {
+      var local = portRange(rawLocal);
+      if (local == null) {
+        showErr(addErr, "Local port must be a whole number between 1024 and 65535, or a range.");
+        localIn.focus();
+        return;
+      }
+      if (local.ranged && remote.ranged && (local.end - local.start) !== (remote.end - remote.start)) {
+        showErr(addErr, "The local and remote ranges cover different numbers of ports.");
+        return;
+      }
+      body.local_port = local.start;
+      if (local.ranged) body.local_port_end = local.end;
+    } else if (dir === REMOTE_FWD) {
+      showErr(addErr, "A remote-forward needs the local port of the service on this Mac.");
+      localIn.focus();
+      return;
+    }
+
+    if (!pinBox.checked) {
+      var ttl = parseInt(addForm.elements["ttl"].value || TTL_DEFAULT, 10);
+      body.ttl = isFinite(ttl) ? ttl : parseInt(TTL_DEFAULT, 10);
+    }
+
+    addSubmit.disabled = true;
+    api("POST", API + "/forward", body).then(function (res) {
+      res = res || {};
+      if (Array.isArray(res.forwards)) {
+        flash("added", "Added " + plural(res.forwards.length, "mapping", "mappings") + " on " + host + ".");
+      } else {
+        var rp = num(res.remote_port); if (rp == null) rp = remote.start;
+        var lp = num(res.local_port);
+        var there = ":" + rp + " on " + host;
+        var here = ":" + (lp != null ? lp : "?") + " on this Mac";
+        var pair = (res.direction === REMOTE_FWD || dir === REMOTE_FWD)
+          ? here + " to " + there
+          : there + " to " + here;
+        flash(res.reused ? "reused" : "added",
+          res.reused ? "Already mapped, so the existing " + pair + " is kept." : "Added " + pair + ".");
+      }
+      statusStale = true;
+      closeSheet();
+      schedule(true);
+    }).catch(function (err) {
+      showErr(addErr, msgOf(err, "The daemon rejected that mapping."));
+    }).then(function () { addSubmit.disabled = false; });
+  }
+
+  function submitEdit() {
+    var refs = editRefs;
+    var cur = (refs && refs.data) || {};
+    var changes = {};
+
+    var newLabel = labelIn.value.trim();
+    if (newLabel !== (cur.label || "")) changes.label = newLabel;
+
+    var rawLocal = localIn.value.trim();
+    if (rawLocal) {
+      var lp = portValue(rawLocal);
+      if (lp == null) { showErr(addErr, "Local port must be one port between 1024 and 65535."); localIn.focus(); return; }
+      if (lp !== num(cur.local_port)) changes.local_port = lp;
+    }
+
+    var rawRemote = remoteIn.value.trim();
+    if (rawRemote) {
+      var rp = portValue(rawRemote);
+      if (rp == null) { showErr(addErr, "Remote port must be one port between 1024 and 65535."); remoteIn.focus(); return; }
+      if (rp !== num(cur.remote_port)) changes.remote_port = rp;
+    }
+
+    if (dirOf(cur) === LOCAL_FWD) {
+      var rawTarget = targetIn.value.trim();
+      if (rawTarget && !safeTarget(rawTarget)) {
+        showErr(addErr, "Target host may contain only letters, digits, dots, dashes and underscores.");
+        targetIn.focus();
+        return;
+      }
+      if (rawTarget !== targetOf(cur)) changes.remote_host = rawTarget;
+    }
+
+    if (pinBox.checked !== (cur.pinned === true)) changes.pinned = pinBox.checked;
+
+    var ttlRaw = addForm.elements["ttl"].value;
+    if (!pinBox.checked && ttlRaw !== "") {
+      var ttl = parseInt(ttlRaw, 10);
+      if (ttl !== num(cur.ttl)) changes.ttl = ttl;
+    }
+
+    if (!Object.keys(changes).length) {
+      closeSheet();
+      return;
+    }
+
+    addSubmit.disabled = true;
+    api("PATCH", API + "/forward/" + idPath(keyOf(cur)), changes).then(function () {
+      statusStale = true;
+      closeSheet();
+      schedule(true);
+    }).catch(function (e) {
+      showErr(addErr, msgOf(e, "The daemon rejected that change."));
+    }).then(function () { addSubmit.disabled = false; });
+  }
+
+  /* ---- listening ----------------------------------------------------- */
+
+  // Addresses that mean "the remote's own loopback", which is what a mapping with no
+  // target host already reaches. The daemon's wildcardAddress uses the same set.
+  var WILDCARD = {
+    "": 1, "0.0.0.0": 1, "*": 1, "::": 1, "127.0.0.1": 1, "::1": 1, "localhost": 1
+  };
+
+  // Recomputed against the live table on every render, so a port forwarded from this
+  // list turns into "already mapped" without asking the host again.
+  function mappingFor(alias, e) {
+    var found = null;
+    allRows.some(function (r) {
+      if (hostOf(r) !== alias || dirOf(r) !== LOCAL_FWD || num(r.remote_port) !== e.port) return false;
+      var t = targetOf(r);
+      if (t ? t !== e.address : !WILDCARD[e.address || ""]) return false;
+      found = r;
+      return true;
+    });
+    return found;
+  }
+
+  function setProbeMsg(msg, bad) {
+    probeMsg.textContent = msg || "";
+    probeMsg.classList.toggle("bad", !!bad);
+    probeMsg.classList.toggle("hidden", !msg);
+  }
+
+  function runProbe() {
+    var alias = selected;
+    if (!alias || probing) return;
+    probing = alias;
+    probeRun.disabled = true;
+    probeRunT.textContent = "Looking";
+    probeNote.textContent = "asking " + alias;
+
+    api("GET", API + "/hosts/" + encodeURIComponent(alias) + "/listeners")
+      .then(function (res) {
+        probeCache[alias] = {
+          rows: (res && Array.isArray(res.listeners)) ? res.listeners : [],
+          at: Date.now(),
+          error: ""
+        };
+      })
+      .catch(function (err) {
+        probeCache[alias] = {
+          rows: (probeCache[alias] && probeCache[alias].rows) || null,
+          at: (probeCache[alias] && probeCache[alias].at) || 0,
+          error: msgOf(err, "Could not ask that host what it is listening on.")
+        };
+      })
+      .then(function () {
+        probing = "";
+        probeRun.disabled = false;
+        // Asking a host what it runs connects to it.
+        statusStale = true;
+        probeSig = "";
+        if (selected === alias) paintProbe(true);
+        schedule(true);
+      });
+  }
+
+  function cell(text, cls) {
+    var td = document.createElement("td");
+    if (cls) td.className = cls;
+    if (text != null) td.textContent = text;
+    return td;
+  }
+
+  function ago(ms) {
+    var s = Math.max(0, Math.round((Date.now() - ms) / 1000));
+    if (s < 5) return "just now";
+    if (s < 60) return s + " seconds ago";
+    return duration(s) + " ago";
+  }
+
+  function paintProbe(force) {
+    var alias = selected;
+    probeHost.textContent = alias;
+    var c = probeCache[alias];
+    var busy = probing === alias;
+    probeRun.disabled = !!probing;
+    probeRunT.textContent = busy ? "Looking" : (c ? "Refresh" : "Discover");
+
+    if (busy) probeNote.textContent = "asking " + alias;
+    else if (c && c.at) probeNote.textContent = "checked " + ago(c.at);
+    else probeNote.textContent = "";
+
+    if (!c) {
+      probeTable.classList.add("hidden");
+      probeRows.textContent = "";
+      probeSig = "";
+      setProbeMsg("See what " + alias + " is listening on, and forward a port from the list.", false);
+      return;
+    }
+
+    if (c.error) setProbeMsg(c.error, true);
+    else if (c.rows && !c.rows.length) setProbeMsg("Nothing is listening on " + alias + ", or neither ss nor netstat is installed there.", false);
+    else setProbeMsg("", false);
+
+    var rows = c.rows || [];
+    if (!rows.length) {
+      probeTable.classList.add("hidden");
+      probeRows.textContent = "";
+      probeSig = "";
+      return;
+    }
+
+    // Repaint only when something a row shows has changed, so a keyboard user's focus
+    // on a Forward button survives the poll.
+    var marks = rows.map(function (e) { var m = mappingFor(alias, e); return m ? keyOf(m) : ""; });
+    var sig = alias + "|" + c.at + "|" + marks.join(",");
+    if (!force && sig === probeSig) return;
+    probeSig = sig;
+
+    probeRows.textContent = "";
+    rows.forEach(function (e, i) {
+      var tr = document.createElement("tr");
+      tr.appendChild(cell(":" + e.port, "lp"));
+
+      var what = e.container
+        ? (e.process ? e.process + ", in docker container " + e.container : "docker container " + e.container)
+        : (e.process || "unknown process");
+      var tdw = cell(what, "lw");
+      if (e.pid) tdw.title = "pid " + e.pid;
+      tr.appendChild(tdw);
+      tr.appendChild(cell(e.address || "", "la"));
+
+      var act = document.createElement("td");
+      var mk = marks[i];
+      if (mk) {
+        // Marked, not hidden: a port that vanished from the list would be a worse puzzle.
+        var a = document.createElement("a");
+        a.className = "mapped";
+        a.href = "#";
+        var d = el("span", "dot sm");
+        d.dataset.state = "up";
+        a.append(d, document.createTextNode("already mapped"));
+        a.setAttribute("aria-label", ":" + e.port + " is already mapped; show the mapping");
+        a.addEventListener("click", function (ev) {
+          ev.preventDefault();
+          showRow(mk);
+        });
+        act.appendChild(a);
+      } else {
+        var b = el("button", "btn ghost small");
+        b.type = "button";
+        var plus = document.createElement("span");
+        plus.style.display = "inline-flex";
+        plus.innerHTML = '<svg class="ico" width="14" height="14" viewBox="0 0 24 24" stroke-width="1.6" aria-hidden="true"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>';
+        b.append(plus.firstChild, document.createTextNode("Forward"));
+        b.setAttribute("aria-label", "Forward :" + e.port);
+        b.addEventListener("click", function () { prefillFrom(alias, e, b); });
+        act.appendChild(b);
+      }
+      tr.appendChild(act);
+      probeRows.appendChild(tr);
+    });
+    probeTable.classList.remove("hidden");
+  }
+
+  function showRow(key) {
+    var refs = rowsByKey.get(key);
+    if (!refs) return;
+    refs.li.scrollIntoView({ block: "center", behavior: "smooth" });
+    refs.li.focus({ preventScroll: true });
+    refs.li.classList.add("found");
+    setTimeout(function () { refs.li.classList.remove("found"); }, 1400);
+  }
+
+  // Forward opens the sheet filled in rather than creating the mapping outright: the
+  // local port, the label and the lease are still decisions.
+  function prefillFrom(alias, e, opener) {
+    if (alias !== selected) selectHost(alias);
+    openSheet("add", null, {
+      port: e.port,
+      label: e.container || e.process || "",
+      // A wildcard or loopback listener is reached through the remote's own localhost,
+      // which is the default; anything else has to be named.
+      target: WILDCARD[e.address || ""] ? "" : String(e.address || "")
+    }, opener);
+  }
+
+  probeRun.addEventListener("click", runProbe);
+  emptyDisc.addEventListener("click", function () {
+    runProbe();
+    probeEl.scrollIntoView({ block: "start", behavior: "smooth" });
+  });
+
+  /* ---- polling ------------------------------------------------------- */
 
   function poll() {
     // Relative path on purpose: the page works whatever port the daemon binds.
-    return fetch(API + "/forwards", {
-      headers: { "Accept": "application/json" }
-    })
-      .then(function (res) {
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        return res.json();
-      })
+    return api("GET", API + "/forwards")
       .then(function (data) {
-        var rows = Array.isArray(data) ? data : [];
-        var waiting = rows.some(function (r) { return r.state === "reconnecting"; });
-        if (!waiting) {
-          hostHealth = {};
-          render(rows);
-          return;
-        }
-        // Only fetched when a row actually says it is reconnecting, so the ordinary
-        // case stays at one request per poll. The detail — which attempt, how long
-        // until the next — lives on /admin/status, not on the mapping.
-        return fetch(API + "/status", {
-          headers: { "Accept": "application/json" }
-        })
-          .then(function (res) { return res.ok ? res.json() : null; })
-          .catch(function () { return null; })
-          .then(function (st) {
-            hostHealth = (st && st.hosts) || {};
-            render(rows);
-          });
+        var wasDown = !daemonUp;
+        allRows = Array.isArray(data) ? data : [];
+        daemonUp = true;
+        if (wasDown) { statusStale = true; return loadHosts(); }
       })
-      .catch(function () { renderDown(); });
+      .then(function () {
+        if (!needStatus()) { hostHealth = pruneHealth(); return; }
+        return fetchStatus();
+      })
+      .then(function () {
+        loadedOnce = true;
+        mergeHosts();
+        renderAll();
+      })
+      .catch(function () {
+        daemonUp = false;
+        allRows = [];
+        rowsByKey.forEach(function (refs) { refs.li.remove(); });
+        rowsByKey.clear();
+        closeMenu(false);
+        closeSheet();
+        renderAll();
+      });
+  }
+
+  // When nothing needs /admin/status, keep what it last said about healthy hosts so the
+  // sidebar dots do not flicker to hollow between fetches.
+  function pruneHealth() {
+    var out = {};
+    Object.keys(hostHealth).forEach(function (k) {
+      if (hostHealth[k] && hostHealth[k].healthy === true) out[k] = hostHealth[k];
+    });
+    return out;
   }
 
   function schedule(now) {
     if (timer) clearTimeout(timer);
-    var run = function () { poll().then(function () { timer = setTimeout(run, POLL_MS); }); };
-    timer = setTimeout(run, now ? 0 : POLL_MS);
+    timer = null;
+    // The recurring poll pauses while the tab is hidden and visibilitychange starts it
+    // again. A refresh asked for by an action still runs once, hidden or not.
+    var run = function (force) {
+      timer = null;
+      if (!force && document.visibilityState === "hidden") return;
+      poll().then(function () {
+        if (!timer && document.visibilityState !== "hidden") timer = setTimeout(run, POLL_MS);
+      });
+    };
+    timer = setTimeout(function () { run(!!now); }, now ? 0 : POLL_MS);
   }
 
   document.addEventListener("visibilitychange", function () {
     if (document.visibilityState === "visible") schedule(true);
+    else if (timer) { clearTimeout(timer); timer = null; }
   });
 
-  syncDir();
-  // The discovery picker needs the host list whether or not the add form is ever
-  // opened, so it is loaded once here rather than on first patch.
-  loadHosts();
-  schedule(true);
+  // A native app links to /#add to land on the add sheet.
+  function wantsAdd() { return location.hash === "#add"; }
+  window.addEventListener("hashchange", function () {
+    if (wantsAdd() && !sheet.open) openSheet("add", null, null, addOpenBtn);
+  });
+
+  loadHosts()
+    .then(function () { return poll(); })
+    .then(function () {
+      if (wantsAdd()) openSheet("add", null, null, addOpenBtn);
+      schedule(false);
+    });
 })();
 </script>
 </body>

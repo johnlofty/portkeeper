@@ -58,3 +58,33 @@ logs:
 
 clean:
 	rm -f $(BINARY)
+
+# ---- the menu-bar app -------------------------------------------------------------
+#
+# `make app` builds build/Portkeeper.app: the Swift menu-bar client with the daemon
+# bundled beside it. Like `build`, it touches nothing outside the repo.
+#
+# `make app-install` copies the bundle to ~/Applications and unloads the dev agent
+# (and removes its plist, so it does not come back at the next login),
+# because the bundle's own helper and the dev agent would both bind 9996 and only one
+# can. It does not register the helper: that is done from the app's Settings, from the
+# installed copy, because SMAppService records the bundle's location at registration.
+
+APP_BUNDLE   := build/Portkeeper.app
+APP_DEST     := $(HOME)/Applications/Portkeeper.app
+
+.PHONY: app app-install
+
+app:
+	macos/build-app.sh
+
+app-install: app
+	-launchctl unload $(AGENTS)/$(PLIST) 2>/dev/null
+	rm -f $(AGENTS)/$(PLIST)
+	@mkdir -p $(HOME)/Applications
+	rm -rf $(APP_DEST)
+	cp -R $(APP_BUNDLE) $(APP_DEST)
+	@echo "installed: $(APP_DEST)"
+	@echo "unloaded the dev agent $(LABEL), if it was loaded."
+	@echo "next: open $(APP_DEST), then Settings > Background helper > Register"
+	@echo "      (and approve it in System Settings > Login Items if asked)."

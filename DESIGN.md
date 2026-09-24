@@ -1037,3 +1037,84 @@ refusal is `errSelfForward`, a 400.
   from before the rename, if it survived) is now unread. It was left in place; the owner
   may delete it. `LG_ADMIN_PASSWORD` and `LG_ADMIN_PASSWORD_FILE` are ignored.
 - `/admin/status` no longer carries `admin_enabled`.
+
+## A menu-bar app (2026-09-24)
+
+Portkeeper.app, under `macos/`, is a second client of the daemon. It is Swift because the
+popover on the design boards (per-host sections, a drawn cable per mapping, port chips) is
+more than a tray library can draw: those libraries give you a system menu of one-line
+items and nothing else. It is a **thin** client because the daemon is the tested, hard
+part, and nothing about ssh, backoff, pins or discovery is worth writing twice.
+
+### The API is the line
+
+The app reads `GET /admin/forwards` and `GET /admin/status`, polled every two seconds,
+against the literal `http://127.0.0.1:9996`. That string is not a preference. The origin
+guard refuses any Host that is not the daemon's own address, so a friendlier name would
+be a 400. URLSession sends no `Sec-Fetch-Site` and no `Origin`, so to the guard the app is
+curl, which is what it is: a process running as the owner, never defended against.
+
+`/admin/status` now carries `"api_version": 1`. The console cannot drift from the daemon,
+because it is compiled into it; the app is built separately and can. The rule is to bump
+the number when a field a client reads changes meaning or goes away, not when one is
+added. The app decodes it as optional, so a daemon from before the field still shows, and
+says so in Settings.
+
+The Codable models mirror `forwardView` and `hostHealthView` field for field in the
+daemon's snake_case. `hosts`, `eager_hosts` and the forwards list are decoded as
+optional, because Go encodes a nil map or slice as `null` and an idle daemon must not read
+as a broken one. One test decodes a literal of each shape.
+
+The app writes nothing. **Add mapping** opens the console window on `/#add`, and the
+console's own add sheet does the work: ranges, target hosts and pins are validated there
+already, and a native form would be a second copy of that validation, drifting. Two
+consequences worth knowing. From a loaded `/` to `/#add` is a fragment navigation, so the
+console has to react to `hashchange`, not only read the hash at load. And asking for the
+URL already showing reloads the page, so a second **Add mapping** still opens the sheet.
+
+### Two launchd jobs, one port
+
+The bundle carries its own job, `io.github.johnlofty.portkeeper.helper`, in
+`Contents/Library/LaunchAgents`, registered through `SMAppService.agent(plistName:)`. It is
+the dev plist with three differences:
+
+- `BundleProgram` = `Contents/MacOS/portkeeperd` instead of an absolute `ProgramArguments`
+  path. SMAppService resolves it against the bundle, which is the point of bundling.
+- `KeepAlive` is `{SuccessfulExit: false}` instead of `true`: restart on a crash, not on a
+  clean exit.
+- Its own label. The app's bundle id, `io.github.johnlofty.portkeeper.app`, is distinct
+  from both labels, because an app and a job are different things to macOS and sharing a
+  name only confuses the Login Items list.
+
+The dev agent from `make install` and the helper are both portkeeperd on 127.0.0.1:9996.
+The listen port is the singleton lock, bound first thing in `main.go`:
+the second one to start gets `listen: address already in use`, exits 1 before it touches
+any ssh state, and, since that is not a successful exit, launchd restarts it into the same
+failure about every ten seconds. Harmless, and noisy. `make app-install` therefore
+unloads and removes the dev agent before copying the bundle, and prints that the helper
+must then be registered from Settings; nothing registers it automatically. The app works
+equally well against either daemon, since all it needs is the port.
+
+A registration records where the bundle is. Register from `build/` and then rebuild or
+move it, and launchd is left pointing at a copy that changed or is gone. So the app is
+meant to be run from where it will stay, `~/Applications/Portkeeper.app`, and `make app`
+never registers anything.
+
+A registered helper can sit in `requiresApproval` until the owner approves it once in
+System Settings > Login Items, and in that state launchd silently never starts it.
+Settings shows the state and a button to that pane, because otherwise the failure is a
+daemon that simply is not there.
+
+### What is not verified
+
+The bundle builds, lints, signs ad hoc and passes `codesign --verify --deep --strict`.
+It has not been launched. In particular these are written to what the documentation
+says and not yet observed: that a `Window` scene declared after `MenuBarExtra` does not
+open at launch; that `NSApp.activate` before `openWindow` and `openSettings` brings those
+windows in front for an `LSUIElement` app; the approval flow; and the notifications on
+reconnect and on a mapping going away.
+
+One toolchain scar from building it: under the Command Line Tools, the macOS 26 SDK's
+SwiftUI expands `@State` through a macro plugin the CLT does not ship, so any `@State`
+fails to compile there while building fine under Xcode. The app uses no `@State` (its
+Settings state is an `ObservableObject`), so a plain `swift build` works under either.

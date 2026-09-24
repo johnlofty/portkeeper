@@ -192,6 +192,49 @@ detected and removed before a new one is started, and a new master is given a fe
 to settle before any forward is sent to it. Both of those are scars; `DESIGN.md` has the
 stories.
 
+## The menu-bar app
+
+`macos/` holds Portkeeper.app, a SwiftUI menu-bar client of the same daemon. It draws
+nothing the console does not already know: it polls `GET /admin/forwards` and
+`GET /admin/status` on `http://127.0.0.1:9996` every two seconds, shows each host with its
+mappings, and opens the console in a window of its own. **Add mapping** opens that window
+on `/#add`, the console's add sheet; there is no second, native form to drift from it.
+
+The menu-bar item is the count of mappings that are alive, or `!` when a host is
+reconnecting or the daemon cannot be reached. In each row the arrowhead points at the side
+where the port appears: right for a local-forward, left for a remote-forward.
+
+```sh
+make app              # builds build/Portkeeper.app, with portkeeperd bundled inside
+make app-install      # copies it to ~/Applications, unloads and removes the dev agent
+```
+
+Neither registers anything. The bundle carries its own launchd job,
+`io.github.johnlofty.portkeeper.helper`, which runs the bundled `portkeeperd`; it is
+registered from the app's **Settings > Background helper**, and macOS may then ask for a
+one-time approval in System Settings > Login Items. Until that is approved the helper is
+registered but never starts, and Settings says so.
+
+**Only one daemon can run.** The dev agent from `make install` and the bundled helper both
+bind 127.0.0.1:9996, and the listen port is the daemon's singleton lock: whichever starts
+second exits on it (and launchd retries it every ten seconds or so, filling the log). So
+pick one. To try the app against the dev agent, open `build/Portkeeper.app` and leave the
+helper unregistered. To switch to the bundled helper, `make app-install` (which unloads
+the dev agent and removes its plist, so it does not come back at next login), then
+register from Settings.
+
+**Run the app from where it will stay.** SMAppService records the bundle's location when
+the login item or the helper is registered, so registering from `build/` and then moving
+the app, or running `make app` again, leaves launchd pointing at a copy that changed or is
+gone. Register from `~/Applications/Portkeeper.app`.
+
+Quitting the app does not stop the daemon or drop any mapping; launchd owns it either way.
+
+`swift build -c release` and `swift test` work from `macos/Portkeeper`. `swift test`
+needs Xcode rather than the Command Line Tools, for XCTest: if `xcode-select -p` points at
+the CLT, prefix it with `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`.
+`build-app.sh` does that for itself.
+
 ## License
 
 [Anti 996 License, Version 1.0](https://github.com/996icu/996.ICU/blob/master/LICENSE) — see [LICENSE](LICENSE).
