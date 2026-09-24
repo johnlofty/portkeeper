@@ -105,7 +105,7 @@ func TestMalformedPinFileIsIgnoredNotFatal(t *testing.T) {
 func TestAdminCanPinOnCreate(t *testing.T) {
 	h, m, _ := testServer(t)
 
-	w := do(t, h, "POST", "/admin/forward", `{"remote_port":8530,"label":"mkdp","pinned":true,"ttl":3600}`)
+	w := do(t, h, "POST", "/api/forward", `{"remote_port":8530,"label":"mkdp","pinned":true,"ttl":3600}`)
 	if w.Code != 200 {
 		t.Fatalf("code %d: %s", w.Code, w.Body)
 	}
@@ -128,7 +128,7 @@ func TestAdminCanPinAndUnpinAnExistingMapping(t *testing.T) {
 	post(t, h, `{"remote_port":8530}`)
 	id := m.List()[0].ID
 
-	if w := do(t, h, "PATCH", "/admin/forward/"+id, `{"pinned":true}`); w.Code != 200 {
+	if w := do(t, h, "PATCH", "/api/forward/"+id, `{"pinned":true}`); w.Code != 200 {
 		t.Fatalf("pin: %d %s", w.Code, w.Body)
 	}
 	if v := m.List()[0]; !v.Pinned || v.TTL != 0 {
@@ -138,7 +138,7 @@ func TestAdminCanPinAndUnpinAnExistingMapping(t *testing.T) {
 		t.Fatal("the pin was not persisted")
 	}
 
-	if w := do(t, h, "PATCH", "/admin/forward/"+id, `{"pinned":false}`); w.Code != 200 {
+	if w := do(t, h, "PATCH", "/api/forward/"+id, `{"pinned":false}`); w.Code != 200 {
 		t.Fatalf("unpin: %d %s", w.Code, w.Body)
 	}
 	if m.List()[0].Pinned {
@@ -153,12 +153,12 @@ func TestAdminCanPinAndUnpinAnExistingMapping(t *testing.T) {
 // straight back, which reads as the daemon ignoring the operator.
 func TestAdminCloseOfAPinnedMappingRemovesThePin(t *testing.T) {
 	h, m, _ := testServer(t)
-	if w := do(t, h, "POST", "/admin/forward", `{"remote_port":8530,"pinned":true}`); w.Code != 200 {
+	if w := do(t, h, "POST", "/api/forward", `{"remote_port":8530,"pinned":true}`); w.Code != 200 {
 		t.Fatalf("setup: %d %s", w.Code, w.Body)
 	}
 	id := m.List()[0].ID
 
-	if w := do(t, h, "DELETE", "/admin/forward/"+id, ""); w.Code != 200 {
+	if w := do(t, h, "DELETE", "/api/forward/"+id, ""); w.Code != 200 {
 		t.Fatalf("close: %d %s", w.Code, w.Body)
 	}
 	if n := len(m.List()); n != 0 {
@@ -187,7 +187,7 @@ func TestPinFlagIsVisibleInTheList(t *testing.T) {
 		t.Fatalf("pin book holds %d pins, want 1", n)
 	}
 
-	w := do(t, h, "GET", "/admin/forwards", "")
+	w := do(t, h, "GET", "/api/forwards", "")
 	var got []forwardView
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
@@ -201,12 +201,12 @@ func TestPinFlagIsVisibleInTheList(t *testing.T) {
 // re-creates the mapping the operator has just edited away from.
 func TestEditingAPinnedMappingMovesThePin(t *testing.T) {
 	h, m, _ := testServer(t)
-	if w := do(t, h, "POST", "/admin/forward", `{"remote_port":8530,"pinned":true}`); w.Code != 200 {
+	if w := do(t, h, "POST", "/api/forward", `{"remote_port":8530,"pinned":true}`); w.Code != 200 {
 		t.Fatalf("setup: %d %s", w.Code, w.Body)
 	}
 	id := m.List()[0].ID
 
-	if w := do(t, h, "PATCH", "/admin/forward/"+id, `{"remote_port":8531}`); w.Code != 200 {
+	if w := do(t, h, "PATCH", "/api/forward/"+id, `{"remote_port":8531}`); w.Code != 200 {
 		t.Fatalf("edit: %d %s", w.Code, w.Body)
 	}
 	pins := m.pins.List()

@@ -15,10 +15,10 @@ func testServer(t *testing.T) (http.Handler, *manager, *fakeRunner) {
 	return newServer(m, m.cfg), m, fr
 }
 
-// post creates a mapping the way the console does, through /admin/forward.
+// post creates a mapping the way the console does, through /api/forward.
 func post(t *testing.T, h http.Handler, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	return do(t, h, "POST", "/admin/forward", body)
+	return do(t, h, "POST", "/api/forward", body)
 }
 
 // newReq builds a request shaped like one from curl on this Mac: the daemon's own Host,
@@ -69,7 +69,7 @@ func TestOpenHappyPath(t *testing.T) {
 	}
 }
 
-// Everything the old public tier was refused is now simply what /admin/forward does. A
+// Everything the old public tier was refused is now simply what /api/forward does. A
 // remote-forward, a browser open, a target host on the remote and a pin all go through
 // the one route.
 func TestAdminForwardCoversEveryCapability(t *testing.T) {
@@ -78,19 +78,19 @@ func TestAdminForwardCoversEveryCapability(t *testing.T) {
 	var opened []string
 	m.openURL = func(u string) { opened = append(opened, u) }
 
-	if w := do(t, h, "POST", "/admin/forward", `{"direction":"remote-forward","local_port":3000}`); w.Code != 200 {
+	if w := do(t, h, "POST", "/api/forward", `{"direction":"remote-forward","local_port":3000}`); w.Code != 200 {
 		t.Fatalf("remote-forward rejected: %d %s", w.Code, w.Body)
 	}
-	if w := do(t, h, "POST", "/admin/forward", `{"remote_port":8530,"open":true}`); w.Code != 200 {
+	if w := do(t, h, "POST", "/api/forward", `{"remote_port":8530,"open":true}`); w.Code != 200 {
 		t.Fatalf("open rejected: %d %s", w.Code, w.Body)
 	}
-	if w := do(t, h, "POST", "/admin/forward", `{"remote_port":5432,"remote_host":"db","local_port":15432}`); w.Code != 200 {
+	if w := do(t, h, "POST", "/api/forward", `{"remote_port":5432,"remote_host":"db","local_port":15432}`); w.Code != 200 {
 		t.Fatalf("target host on the remote rejected: %d %s", w.Code, w.Body)
 	}
-	if w := do(t, h, "POST", "/admin/forward", `{"remote_port":9100,"pinned":true}`); w.Code != 200 {
+	if w := do(t, h, "POST", "/api/forward", `{"remote_port":9100,"pinned":true}`); w.Code != 200 {
 		t.Fatalf("pin rejected: %d %s", w.Code, w.Body)
 	}
-	if w := do(t, h, "POST", "/admin/forward", `{"remote_port":8000,"remote_port_end":8002}`); w.Code != 200 {
+	if w := do(t, h, "POST", "/api/forward", `{"remote_port":8000,"remote_port_end":8002}`); w.Code != 200 {
 		t.Fatalf("range rejected: %d %s", w.Code, w.Body)
 	}
 
@@ -111,7 +111,7 @@ func TestAdminForwardCoversEveryCapability(t *testing.T) {
 			id = v.ID
 		}
 	}
-	if w := do(t, h, "DELETE", "/admin/forward/"+id, ""); w.Code != 200 {
+	if w := do(t, h, "DELETE", "/api/forward/"+id, ""); w.Code != 200 {
 		t.Fatalf("close of a remote-forward: %d %s", w.Code, w.Body)
 	}
 }
@@ -131,17 +131,17 @@ func TestEveryDataRouteRefusesCrossSiteAndServesTheConsole(t *testing.T) {
 		method, path, body string
 		want               int
 	}{
-		{"GET", "/admin/hosts", "", 200},
-		{"POST", "/admin/hosts", `{"alias":"box2"}`, 200},
-		{"DELETE", "/admin/hosts/box2", "", 200},
-		{"GET", "/admin/hosts/code/listeners", "", 200},
-		{"GET", "/admin/status", "", 200},
-		{"GET", "/admin/forwards", "", 200},
-		{"POST", "/admin/forward", `{"remote_port":8530}`, 200},
-		{"PATCH", "/admin/forward/code:local-forward:8530", `{"label":"x"}`, 200},
-		{"DELETE", "/admin/forward/code:local-forward:8530", "", 200},
-		{"PATCH", "/admin/forward/code:local-forward:1234", `{"label":"x"}`, 404},
-		{"DELETE", "/admin/forward/code:local-forward:1234", "", 404},
+		{"GET", "/api/hosts", "", 200},
+		{"POST", "/api/hosts", `{"alias":"box2"}`, 200},
+		{"DELETE", "/api/hosts/box2", "", 200},
+		{"GET", "/api/hosts/code/listeners", "", 200},
+		{"GET", "/api/status", "", 200},
+		{"GET", "/api/forwards", "", 200},
+		{"POST", "/api/forward", `{"remote_port":8530}`, 200},
+		{"PATCH", "/api/forward/code:local-forward:8530", `{"label":"x"}`, 200},
+		{"DELETE", "/api/forward/code:local-forward:8530", "", 200},
+		{"PATCH", "/api/forward/code:local-forward:1234", `{"label":"x"}`, 404},
+		{"DELETE", "/api/forward/code:local-forward:1234", "", 404},
 	}
 	refusals := []struct {
 		name   string
@@ -186,7 +186,7 @@ func TestEveryDataRouteRefusesCrossSiteAndServesTheConsole(t *testing.T) {
 	// What the console itself sends, from either loopback name. The Origin comparison is
 	// against the Host that arrived, not against the configured listen address.
 	for _, host := range []string{"127.0.0.1:9996", "localhost:9996", "[::1]:9996"} {
-		r := newReq("POST", "/admin/forward", `{"remote_port":8531}`)
+		r := newReq("POST", "/api/forward", `{"remote_port":8531}`)
 		r.Host = host
 		r.Header.Set("Sec-Fetch-Site", "same-origin")
 		r.Header.Set("Origin", "http://"+host)
@@ -209,20 +209,21 @@ func TestEveryDataRouteRefusesCrossSiteAndServesTheConsole(t *testing.T) {
 		t.Errorf("GET / with Host: evil.example: code %d, want 400", w.Code)
 	}
 
-	// The routes the control channel and the login used to answer on are gone, not
-	// merely gated.
+	// The retired surfaces are gone, not merely gated: the login routes, the old /admin
+	// prefix, and the bare pre-/api legacy routes. The /api paths themselves are back with a
+	// different meaning, loopback-only and origin-guarded. The invariant is that nothing
+	// reaches the daemon from the remote, and the guard decides that, not a path.
 	for _, c := range []struct{ method, path, body string }{
+		{"GET", "/admin/forwards", ""},
+		{"POST", "/admin/forward", `{"remote_port":8530}`},
+		{"GET", "/admin/status", ""},
 		{"POST", "/admin/login", `{"password":"x"}`},
-		{"POST", "/admin/logout", ""},
-		{"GET", "/api/forwards", ""},
-		{"POST", "/api/forward", `{"remote_port":8530}`},
-		{"DELETE", "/api/forward/code:local-forward:8530", ""},
 		{"POST", "/forward", `{"remote_port":8530}`},
 		{"GET", "/forwards", ""},
 		{"DELETE", "/forward/8530", ""},
 	} {
 		if w := do(t, h, c.method, c.path, c.body); w.Code != 404 {
-			t.Errorf("%s %s: code %d, want 404 — the route should not exist", c.method, c.path, w.Code)
+			t.Errorf("%s %s: code %d, want 404 — a retired route", c.method, c.path, w.Code)
 		}
 	}
 }
@@ -247,7 +248,7 @@ func TestContentTypeRule(t *testing.T) {
 
 	h, m, _ := testServer(t)
 	post(t, h, `{"remote_port":8530}`)
-	r := newReq("DELETE", "/admin/forward/"+m.List()[0].ID, "")
+	r := newReq("DELETE", "/api/forward/"+m.List()[0].ID, "")
 	r.Header.Del("Content-Type")
 	if w := serve(h, r); w.Code != 200 {
 		t.Fatalf("bodiless DELETE with no Content-Type: code %d, want 200: %s", w.Code, w.Body)
@@ -308,13 +309,13 @@ func TestCloseEndpoint(t *testing.T) {
 	post(t, h, `{"remote_port":8530}`)
 	id := m.List()[0].ID
 
-	if w := do(t, h, "DELETE", "/admin/forward/"+id, ""); w.Code != 200 {
+	if w := do(t, h, "DELETE", "/api/forward/"+id, ""); w.Code != 200 {
 		t.Fatalf("code %d: %s", w.Code, w.Body)
 	}
 	if !fr.sawSubcommand("cancel") {
 		t.Fatal("no ssh -O cancel issued")
 	}
-	if w := do(t, h, "DELETE", "/admin/forward/"+id, ""); w.Code != 404 {
+	if w := do(t, h, "DELETE", "/api/forward/"+id, ""); w.Code != 404 {
 		t.Fatalf("second close: code %d, want 404", w.Code)
 	}
 }
@@ -324,7 +325,7 @@ func TestEditUpdatesLabel(t *testing.T) {
 	post(t, h, `{"remote_port":8530,"label":"before"}`)
 	id := m.List()[0].ID
 
-	if w := do(t, h, "PATCH", "/admin/forward/"+id, `{"label":"after"}`); w.Code != 200 {
+	if w := do(t, h, "PATCH", "/api/forward/"+id, `{"label":"after"}`); w.Code != 200 {
 		t.Fatalf("admin edit: %d %s", w.Code, w.Body)
 	}
 	if got := m.List()[0].Label; got != "after" {
@@ -336,7 +337,7 @@ func TestListEndpointShape(t *testing.T) {
 	h, _, _ := testServer(t)
 	post(t, h, `{"remote_port":8530,"label":"mkdp"}`)
 
-	w := do(t, h, "GET", "/admin/forwards", "")
+	w := do(t, h, "GET", "/api/forwards", "")
 	if w.Code != 200 {
 		t.Fatalf("code %d", w.Code)
 	}
@@ -379,7 +380,7 @@ func itoa(i int) string { return strconv.Itoa(i) }
 
 func TestStatusCarriesAPIVersion(t *testing.T) {
 	h, _, _ := testServer(t)
-	w := do(t, h, "GET", "/admin/status", "")
+	w := do(t, h, "GET", "/api/status", "")
 	if w.Code != 200 {
 		t.Fatalf("code %d: %s", w.Code, w.Body)
 	}

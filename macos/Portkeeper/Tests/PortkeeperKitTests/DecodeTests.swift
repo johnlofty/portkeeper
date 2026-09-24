@@ -1,7 +1,7 @@
 import XCTest
 @testable import PortkeeperKit
 
-/// The literals are the daemon's own output shapes (forwardView, and the /admin/status
+/// The literals are the daemon's own output shapes (forwardView, and the /api/status
 /// map in http.go). If a field is renamed on the Go side, this is where it shows.
 final class DecodeTests: XCTestCase {
     func testDecodesForwardAndStatus() throws {

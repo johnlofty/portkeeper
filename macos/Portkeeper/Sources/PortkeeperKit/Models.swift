@@ -4,7 +4,7 @@ import Foundation
 // rename on either side shows up as a decode failure in the test rather than as a
 // silently blank row.
 
-/// One mapping, as `GET /admin/forwards` returns it (Go: forwardView).
+/// One mapping, as `GET /api/forwards` returns it (Go: forwardView).
 public struct Forward: Codable, Identifiable, Equatable, Sendable {
     public var id: String
     public var host: String
@@ -41,7 +41,7 @@ public struct Forward: Codable, Identifiable, Equatable, Sendable {
     public var isAlive: Bool { state == "alive" }
 }
 
-/// One host's connection state, the values of `hosts` in `/admin/status` (Go: hostHealthView).
+/// One host's connection state, the values of `hosts` in `/api/status` (Go: hostHealthView).
 public struct HostHealth: Codable, Equatable, Sendable {
     public var healthy: Bool
     public var attempts: Int
@@ -56,7 +56,7 @@ public struct HostHealth: Codable, Equatable, Sendable {
     }
 }
 
-/// `GET /admin/status`.
+/// `GET /api/status`.
 ///
 /// The collections are optional because Go encodes a nil map or slice as `null`, and an
 /// idle daemon must not read as a broken one. api_version is optional because a daemon

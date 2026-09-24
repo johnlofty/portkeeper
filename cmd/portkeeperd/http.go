@@ -81,7 +81,7 @@ type server struct {
 // so RemoteAddr is never consulted: what the guard asks is whether the request came from
 // a page this daemon served, or from no browser at all.
 //
-// The /admin prefix predates the login going and is kept only to avoid churn.
+// The /api prefix predates the login going and is kept only to avoid churn.
 func newServer(m *manager, cfg *Config) http.Handler {
 	s := &server{m: m, cfg: cfg, loggedBad: map[string]bool{}}
 	s.hosts = map[string]bool{cfg.Listen: true}
@@ -91,15 +91,15 @@ func newServer(m *manager, cfg *Config) http.Handler {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /admin/hosts", s.listHosts)
-	mux.HandleFunc("POST /admin/hosts", s.addHost)
-	mux.HandleFunc("DELETE /admin/hosts/{alias}", s.removeHost)
-	mux.HandleFunc("GET /admin/hosts/{alias}/listeners", s.hostListeners)
-	mux.HandleFunc("GET /admin/status", s.status)
-	mux.HandleFunc("GET /admin/forwards", s.list)
-	mux.HandleFunc("POST /admin/forward", s.open)
-	mux.HandleFunc("PATCH /admin/forward/{ref}", s.edit)
-	mux.HandleFunc("DELETE /admin/forward/{ref}", s.close)
+	mux.HandleFunc("GET /api/hosts", s.listHosts)
+	mux.HandleFunc("POST /api/hosts", s.addHost)
+	mux.HandleFunc("DELETE /api/hosts/{alias}", s.removeHost)
+	mux.HandleFunc("GET /api/hosts/{alias}/listeners", s.hostListeners)
+	mux.HandleFunc("GET /api/status", s.status)
+	mux.HandleFunc("GET /api/forwards", s.list)
+	mux.HandleFunc("POST /api/forward", s.open)
+	mux.HandleFunc("PATCH /api/forward/{ref}", s.edit)
+	mux.HandleFunc("DELETE /api/forward/{ref}", s.close)
 
 	mux.HandleFunc("GET /{$}", s.root)
 	return s.originGuard(mux)

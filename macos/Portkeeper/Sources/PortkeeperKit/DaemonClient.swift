@@ -54,8 +54,8 @@ public final class DaemonClient: ObservableObject {
 
     public func poll() async {
         do {
-            async let f: [Forward]? = get("/admin/forwards")
-            async let s: Status = get("/admin/status")
+            async let f: [Forward]? = get("/api/forwards")
+            async let s: Status = get("/api/status")
             let (newForwards, newStatus) = try await (f, s)
             let old = sections
             forwards = newForwards ?? []

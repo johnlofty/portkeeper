@@ -725,7 +725,7 @@
   var POLL_MS = 3000;
   var LOCAL_FWD = "local-forward";
   var REMOTE_FWD = "remote-forward";
-  var API = "/admin";
+  var API = "/api";
   var TTL_DEFAULT = "28800"; // 8h
   var STORE_KEY = "portkeeper.host";
 
@@ -805,14 +805,14 @@
 
   /* ---- state --------------------------------------------------------- */
 
-  var hostBook = [];        // /admin/hosts, in the daemon's order
+  var hostBook = [];        // /api/hosts, in the daemon's order
   var hosts = [];           // hostBook plus any host that only appears on a mapping
   var selected = "";
-  var allRows = [];         // the last /admin/forwards
+  var allRows = [];         // the last /api/forwards
   var daemonUp = true;
   var loadedOnce = false;
 
-  // Per-host connection state from /admin/status. It is fetched on load, after anything
+  // Per-host connection state from /api/status. It is fetched on load, after anything
   // that can change a connection, and on every poll only while some row or host is not
   // healthy, so the ordinary case stays one request per poll.
   var hostHealth = {};
@@ -1016,7 +1016,7 @@
     return allRows.filter(function (r) { return hostOf(r) === alias; });
   }
 
-  // "up", "retry" or "off". /admin/status is the authority; a host it does not list yet
+  // "up", "retry" or "off". /api/status is the authority; a host it does not list yet
   // is still up if the daemon is carrying a live mapping on it.
   function hostState(alias) {
     var h = hostHealth[alias];
@@ -2060,7 +2060,7 @@
       });
   }
 
-  // When nothing needs /admin/status, keep what it last said about healthy hosts so the
+  // When nothing needs /api/status, keep what it last said about healthy hosts so the
   // sidebar dots do not flicker to hollow between fetches.
   function pruneHealth() {
     var out = {};

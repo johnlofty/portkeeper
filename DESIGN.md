@@ -1118,3 +1118,19 @@ One toolchain scar from building it: under the Command Line Tools, the macOS 26 
 SwiftUI expands `@State` through a macro plugin the CLT does not ship, so any `@State`
 fails to compile there while building fine under Xcode. The app uses no `@State` (its
 Settings state is an `ObservableObject`), so a plain `swift build` works under either.
+
+## Routes move to `/api` (2026-09-24)
+
+Every route lived under `/admin` because there used to be a public tier beside it. With
+one authority level the prefix described nothing, so the routes are now `/api/forwards`,
+`/api/forward`, `/api/forward/{ref}`, `/api/hosts`, `/api/hosts/{alias}`,
+`/api/hosts/{alias}/listeners` and `/api/status`. The console, the Swift client and the
+README follow.
+
+The first three paths are byte-for-byte the retired public API's. That is fine, and worth
+saying plainly: what the retirement changed was not the paths but the reach. No port is
+forwarded to this listener from the remote, and the origin guard decides who gets an
+answer. A path never was the security boundary, which is what "Authorization by
+capability, not by port" argued from the other side. The route-table test now asserts that
+`/admin/*` and the bare pre-`/api` routes are gone, and that `/api/*` is guarded like
+everything else.

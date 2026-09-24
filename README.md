@@ -71,9 +71,9 @@ server you have forwarded to `127.0.0.1`, cannot drive it. A request with no bro
 headers at all is served, so `curl` from a terminal works:
 
 ```sh
-curl -s http://127.0.0.1:9996/admin/forwards
+curl -s http://127.0.0.1:9996/api/forwards
 curl -s -X POST -H 'Content-Type: application/json' \
-     -d '{"remote_port":8530}' http://127.0.0.1:9996/admin/forward
+     -d '{"remote_port":8530}' http://127.0.0.1:9996/api/forward
 ```
 
 That is also the limit of it. Anything running as you on the Mac can reach the daemon, as
@@ -81,8 +81,8 @@ it always could: a password file that process could read never stopped it. A map
 cannot use the daemon's own port as its local port, in either direction; a remote-forward
 of it would publish the console to the remote.
 
-If you have `~/.config/portkeeper/admin-password` from an earlier version (or
-`~/.config/local-gateway/admin-password` from before the rename), nothing reads it any
+If you have `~/.config/portkeeper/api-password` from an earlier version (or
+`~/.config/local-gateway/api-password` from before the rename), nothing reads it any
 more. Delete it when you like.
 
 ## Install
@@ -145,14 +145,14 @@ where `ss` is missing, plus `docker ps` — and offers a Forward button per row 
 the add form already filled in, with the process or container name as the label. Ports
 that are already mapped are marked rather than hidden, with a link to the one you have.
 
-This is `GET /admin/hosts/{alias}/listeners`. The call is capped at 15 seconds, so a wedged
+This is `GET /api/hosts/{alias}/listeners`. The call is capped at 15 seconds, so a wedged
 docker daemon on the far side cannot hang the console.
 
 ## Forwarding past the remote
 
 A local-forward may target a machine other than the remote's own localhost — the database
 box `code` can reach, say. Set **target host on remote** in the console, or `remote_host`
-on `POST /admin/forward`; leave it empty for localhost, which is what every mapping meant
+on `POST /api/forward`; leave it empty for localhost, which is what every mapping meant
 before the field existed.
 
 The value goes straight into an ssh forward spec, so it is validated against the same
@@ -183,7 +183,7 @@ console says which attempt the daemon is on and when it will try again. Retries 
 hours and wake up wanting the same tunnels. Asking for a forward to that host from the
 console retries immediately, regardless of where the schedule had got to.
 
-`GET /admin/status` carries the same per-host detail under `hosts`: whether it is healthy,
+`GET /api/status` carries the same per-host detail under `hosts`: whether it is healthy,
 how many attempts have failed, seconds until the next one, and the last error. The
 `LG_HOSTS` list is under `eager_hosts`.
 
@@ -195,8 +195,8 @@ stories.
 ## The menu-bar app
 
 `macos/` holds Portkeeper.app, a SwiftUI menu-bar client of the same daemon. It draws
-nothing the console does not already know: it polls `GET /admin/forwards` and
-`GET /admin/status` on `http://127.0.0.1:9996` every two seconds, shows each host with its
+nothing the console does not already know: it polls `GET /api/forwards` and
+`GET /api/status` on `http://127.0.0.1:9996` every two seconds, shows each host with its
 mappings, and opens the console in a window of its own. **Add mapping** opens that window
 on `/#add`, the console's add sheet; there is no second, native form to drift from it.
 

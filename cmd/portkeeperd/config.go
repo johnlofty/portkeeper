@@ -11,7 +11,7 @@ import (
 )
 
 type Config struct {
-	// Listen carries the console and the /admin routes behind it. It is loopback-only
+	// Listen carries the console and the /api routes behind it. It is loopback-only
 	// and nothing off this Mac can reach it; requireLoopback enforces that. Its port is
 	// also one no forward may use locally; see errSelfForward.
 	Listen string

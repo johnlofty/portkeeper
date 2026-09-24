@@ -1029,7 +1029,7 @@ func (m *manager) markDown(host string) {
 	m.hostStateLocked(host).healthy = false
 }
 
-// noteErr attaches the reason a host is down, for /admin/status, without counting a
+// noteErr attaches the reason a host is down, for /api/status, without counting a
 // second attempt against a tick that only made one.
 func (m *manager) noteErr(host string, err error) {
 	if err == nil {

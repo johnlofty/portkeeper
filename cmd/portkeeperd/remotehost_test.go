@@ -153,14 +153,14 @@ func TestAdminMayEditTheRemoteHost(t *testing.T) {
 	post(t, h, `{"remote_port":5432}`)
 	id := m.List()[0].ID
 
-	if w := do(t, h, "PATCH", "/admin/forward/"+id, `{"remote_host":"db"}`); w.Code != 200 {
+	if w := do(t, h, "PATCH", "/api/forward/"+id, `{"remote_host":"db"}`); w.Code != 200 {
 		t.Fatalf("edit: %d %s", w.Code, w.Body)
 	}
 	if got := m.List()[0].ID; got != "code:local-forward:db:5432" {
 		t.Fatalf("id after the edit: %q", got)
 	}
 	// And the same validation applies on the way in.
-	if w := do(t, h, "PATCH", "/admin/forward/code:local-forward:db:5432",
+	if w := do(t, h, "PATCH", "/api/forward/code:local-forward:db:5432",
 		`{"remote_host":"db:80:other"}`); w.Code != 400 {
 		t.Fatalf("injection through edit: %d %s", w.Code, w.Body)
 	}
