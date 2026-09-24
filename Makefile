@@ -1,4 +1,4 @@
-# local-gateway
+# portkeeper
 #
 # `make build` then `make run` is the development loop. `make install` is the
 # only target that touches launchd, and it is deliberately never a dependency
@@ -35,10 +35,13 @@ check:
 run: build
 	$(BINARY)
 
+# The tracked plist carries __REPO__ where this checkout's path belongs, so no home
+# directory is ever committed. install renders it into place instead of symlinking,
+# and unloads the previous rendering first so launchd drops the old definition.
 install: build
 	@mkdir -p $(AGENTS)
-	ln -sf $(REPO)/$(PLIST) $(AGENTS)/$(PLIST)
 	-launchctl unload $(AGENTS)/$(PLIST) 2>/dev/null
+	sed 's#__REPO__#$(REPO)#g' $(PLIST) > $(AGENTS)/$(PLIST)
 	launchctl load $(AGENTS)/$(PLIST)
 	@echo "loaded: $(LABEL) -- logs at /tmp/local-gateway.log"
 

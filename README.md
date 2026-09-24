@@ -75,6 +75,9 @@ can do nothing.
 make install          # builds bin/portkeeperd, loads the launchd agent
 ```
 
+`make install` renders the tracked launchd plist with this checkout's path into
+`~/Library/LaunchAgents/io.github.johnlofty.portkeeper.plist` and loads it.
+
 That is the whole install. The daemon opens its own SSH connection to each host in
 `LG_HOSTS` (default `code`) at startup, on a private ControlPath, so it never fights your
 interactive sessions for a socket and never tears one of them down.
