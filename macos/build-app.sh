@@ -1,9 +1,9 @@
 #!/bin/bash
 # Assembles build/Portkeeper.app: the SwiftUI menu-bar app, the Go daemon beside it in
-# Contents/MacOS, and the launchd plist SMAppService registers it with. Ad-hoc signed.
+# Contents/MacOS. Ad-hoc signed.
 #
-# Builds and signs only. It never registers, loads or launches anything; that is a
-# decision made in the app's Settings, from the copy of the bundle that is going to stay.
+# Builds and signs only. It never installs, loads or launches anything. The app itself
+# writes the daemon's LaunchAgent (DaemonAgent.swift), pointing at the copy it runs from.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -26,7 +26,10 @@ if [[ -z "${DEVELOPER_DIR:-}" && "$(xcode-select -p 2>/dev/null)" == /Library/De
 fi
 
 echo "==> go build"
-go build -o bin/portkeeperd ./cmd/portkeeperd
+# Without the DEVELOPER_DIR above: that points the Swift tools at Xcode, and cgo would
+# follow it to Xcode's linker, which cannot read a newer Command Line Tools SDK
+# ("tapi error: malformed file"). The Go build links with whatever xcode-select chose.
+env -u DEVELOPER_DIR go build -ldflags "-X main.version=$VERSION" -o bin/portkeeperd ./cmd/portkeeperd
 
 echo "==> swift build -c release"
 (cd "$PKG" && swift build -c release)
@@ -89,9 +92,11 @@ $ICON_KEY
 </plist>
 PLIST
 
-# BundleProgram, not ProgramArguments: SMAppService resolves it against wherever the
-# bundle is when the job is registered, which is why the app must be registered from the
-# copy that stays. Otherwise this is the dev plist's job, under its own label.
+# The SMAppService helper that releases up to v0.1.3 registered. It is no longer
+# registered by anything: an ad-hoc signed helper is pinned to the code hash first
+# approved, so no upgrade could ever start (see "Upgrades restart the daemon" in
+# DESIGN.md). It stays in the bundle only so the app can still name it to unregister it
+# for someone upgrading from those releases. Drop it once they are gone.
 cat > "$APP/Contents/Library/LaunchAgents/io.github.johnlofty.portkeeper.helper.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

@@ -15,6 +15,9 @@ public final class DaemonClient: ObservableObject {
 
     @Published public private(set) var forwards: [Forward] = []
     @Published public private(set) var status: Status?
+    /// Counts finished polls, successful or not, so the app can act on the first one
+    /// even when the daemon is not answering at all.
+    @Published public private(set) var polls = 0
     /// Set when the last poll failed; the popover says "daemon not reachable" with it.
     @Published public private(set) var lastError: String?
     /// Called on the main actor after every successful poll with the previous and new
@@ -70,6 +73,7 @@ public final class DaemonClient: ObservableObject {
         } catch {
             lastError = "daemon not reachable at 127.0.0.1:9996"
         }
+        polls += 1
     }
 
     private func get<T: Decodable>(_ path: String) async throws -> T {

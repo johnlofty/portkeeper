@@ -10,16 +10,15 @@ import SwiftUI
 /// only meaningful for a copy of the app that is going to stay put.
 struct SettingsView: View {
     @ObservedObject var client: DaemonClient
+    @ObservedObject var agent: DaemonAgent
 
-    static let helperPlist = "io.github.johnlofty.portkeeper.helper.plist"
     static let logPath = "/tmp/portkeeper.log"
 
     // An ObservableObject rather than @State: under the Command Line Tools toolchain the
     // SwiftUI macro plugin behind @State is missing, and a plain `swift build` must work.
-    @StateObject private var model = LoginItemsModel(helperPlist: SettingsView.helperPlist)
+    @StateObject private var model = LoginItemsModel()
 
     private var openAtLogin: Bool { model.openAtLogin }
-    private var helperStatus: SMAppService.Status { model.helperStatus }
     private var errorText: String? { model.errorText }
 
     var body: some View {
@@ -30,25 +29,20 @@ struct SettingsView: View {
                     set: { model.setOpenAtLogin($0) }))
             }
 
-            Section("Background helper") {
-                LabeledContent("Status", value: describe(helperStatus))
-                Text("The helper is the bundled portkeeperd, run by launchd from this app. Quitting the app does not stop it, which is what keeps tunnels up.")
+            Section("Background daemon") {
+                LabeledContent("Status", value: agentState)
+                Text("The daemon is the bundled portkeeperd, run by launchd as a login agent. Quitting the app does not stop it, which is what keeps tunnels up. Replacing the app restarts it on the new version the next time the app opens.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
-                Text("Only one daemon can own 127.0.0.1:9996. If the development agent from `make install` is loaded, run `make uninstall` first, or the helper will exit on start.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                if helperStatus == .requiresApproval {
-                    Text("macOS needs a one-time approval in Login Items before the helper will run. Until it is approved, the helper is registered but silently never starts.")
+                if case .development = agent.state {
+                    Text("A development daemon from `make install` owns the job. Install here replaces it with this app's daemon.")
                         .font(.callout)
                         .foregroundStyle(Palette.amberText)
-                    Button("Open Login Items settings") { SMAppService.openSystemSettingsLoginItems() }
                 }
                 HStack {
-                    Button("Register") { model.act { try model.helper.register() } }
-                        .disabled(helperStatus == .enabled)
-                    Button("Unregister") { model.act { try model.helper.unregister() } }
-                        .disabled(helperStatus == .notRegistered || helperStatus == .notFound)
+                    Button(agent.state == .thisApp ? "Restart" : "Install") { agent.install() }
+                    Button("Uninstall") { agent.uninstall() }
+                        .disabled(agent.state == .notInstalled)
                 }
             }
 
@@ -62,15 +56,16 @@ struct SettingsView: View {
                 }
             }
 
-            if let errorText {
+            if let errorText = errorText ?? agent.errorText {
                 Text(errorText).font(.callout).foregroundStyle(.red)
             }
         }
         .formStyle(.grouped)
         .frame(width: 480)
-        .onAppear { model.refresh() }
+        .onAppear { model.refresh(); agent.refresh() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             model.refresh()
+            agent.refresh()
         }
     }
 
@@ -80,33 +75,24 @@ struct SettingsView: View {
         return "running, \(s.forwards) mapping\(s.forwards == 1 ? "" : "s"), API \(s.apiVersion.map(String.init) ?? "unversioned")"
     }
 
-    private func describe(_ s: SMAppService.Status) -> String {
-        switch s {
-        case .notRegistered: return "not registered"
-        case .enabled: return "registered and enabled"
-        case .requiresApproval: return "waiting for approval in Login Items"
-        case .notFound: return "not found in this bundle"
-        @unknown default: return "unknown"
+    private var agentState: String {
+        switch agent.state {
+        case .notInstalled: return "not installed"
+        case .thisApp: return "installed, runs this app's daemon"
+        case .otherApp(let path): return "runs another copy: \(path)"
+        case .development(let path): return "development daemon: \(path)"
         }
     }
 }
 
-/// Both SMAppService registrations and their last error.
+/// The app's own login item, and its last error.
 @MainActor
 final class LoginItemsModel: ObservableObject {
     @Published private(set) var openAtLogin = false
-    @Published private(set) var helperStatus: SMAppService.Status = .notRegistered
     @Published private(set) var errorText: String?
-
-    let helper: SMAppService
-
-    init(helperPlist: String) {
-        helper = SMAppService.agent(plistName: helperPlist)
-    }
 
     func refresh() {
         openAtLogin = SMAppService.mainApp.status == .enabled
-        helperStatus = helper.status
     }
 
     func setOpenAtLogin(_ on: Bool) {

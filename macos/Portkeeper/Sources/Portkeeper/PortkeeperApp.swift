@@ -21,6 +21,7 @@ struct PortkeeperApp: App {
     @StateObject private var client = DaemonClient()
     @StateObject private var route = ConsoleRoute()
     private let notifier = Notifier()
+    @StateObject private var agent = DaemonAgent()
 
     var body: some Scene {
         // MenuBarExtra is declared first on purpose: SwiftUI opens the first window-like
@@ -31,6 +32,7 @@ struct PortkeeperApp: App {
         } label: {
             MenuBarLabel(client: client)
                 .task { start() }
+                .onChange(of: client.polls) { _, n in if n == 1 { checkDaemon() } }
         }
         .menuBarExtraStyle(.window)
 
@@ -40,7 +42,7 @@ struct PortkeeperApp: App {
         .defaultSize(width: 1280, height: 880)
 
         Settings {
-            SettingsView(client: client)
+            SettingsView(client: client, agent: agent)
         }
     }
 
@@ -49,6 +51,11 @@ struct PortkeeperApp: App {
     private func start() {
         notifier.attach(to: client)
         client.start()
+    }
+
+    /// Runs once, after the first poll; see DaemonAgent.reconcile.
+    private func checkDaemon() {
+        agent.reconcile(client.status)
     }
 }
 

@@ -14,6 +14,10 @@ import (
 
 const reconcileInterval = 30 * time.Second
 
+// version is the release this binary was built as. `make dist` and macos/build-app.sh set
+// it with -ldflags "-X main.version=<tag>"; a plain `go build` reports "dev".
+var version = "dev"
+
 func main() {
 	log.SetFlags(log.Ltime)
 
@@ -84,7 +88,7 @@ func main() {
 		srv.Shutdown(sctx)
 	}()
 
-	log.Printf("listening on %s, hosts %v", cfg.Listen, cfg.EagerHosts)
+	log.Printf("portkeeperd %s listening on %s, hosts %v", version, cfg.Listen, cfg.EagerHosts)
 	if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
 		log.Printf("http: %v", err)
 	}

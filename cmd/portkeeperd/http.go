@@ -199,6 +199,7 @@ func (s *server) status(w http.ResponseWriter, r *http.Request) {
 		// and reads this to tell "old daemon" from "daemon is broken". Bump it when a
 		// field a client reads changes meaning or goes away; adding one does not.
 		"api_version": 1,
+		"version":     version,
 		"listen":      s.cfg.Listen,
 		// `hosts` is now the per-host connection state, keyed by alias; the flat list of
 		// configured names it used to be moved to `eager_hosts`. What an operator wants

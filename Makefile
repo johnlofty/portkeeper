@@ -16,7 +16,7 @@ REPO    := $(shell pwd)
 all: build
 
 build:
-	go build -o $(BINARY) ./cmd/portkeeperd
+	go build -ldflags "-X main.version=$(VERSION)" -o $(BINARY) ./cmd/portkeeperd
 
 test:
 	go test ./...
@@ -64,11 +64,11 @@ clean:
 # `make app` builds build/Portkeeper.app: the Swift menu-bar client with the daemon
 # bundled beside it. Like `build`, it touches nothing outside the repo.
 #
-# `make app-install` copies the bundle to ~/Applications and unloads the dev agent
-# (and removes its plist, so it does not come back at the next login),
-# because the bundle's own helper and the dev agent would both bind 9996 and only one
-# can. It does not register the helper: that is done from the app's Settings, from the
-# installed copy, because SMAppService records the bundle's location at registration.
+# `make app-install` copies the bundle to ~/Applications and unloads the dev agent (and
+# removes its plist, so it does not come back at the next login). The app and the dev
+# agent share one launchd label, io.github.johnlofty.portkeeper, because only one daemon
+# can own 9996. The app installs its own job from Settings > Background daemon, pointing
+# at the copy it runs from.
 
 APP_BUNDLE   := build/Portkeeper.app
 APP_DEST     := $(HOME)/Applications/Portkeeper.app
@@ -86,8 +86,7 @@ app-install: app
 	cp -R $(APP_BUNDLE) $(APP_DEST)
 	@echo "installed: $(APP_DEST)"
 	@echo "unloaded the dev agent $(LABEL), if it was loaded."
-	@echo "next: open $(APP_DEST), then Settings > Background helper > Register"
-	@echo "      (and approve it in System Settings > Login Items if asked)."
+	@echo "next: open $(APP_DEST), then Settings > Background daemon > Install"
 
 # A downloadable zip of the app. `ditto` keeps the bundle's signature and resource
 # metadata intact where `zip -r` would not. VERSION is passed in (a tag in CI); it never

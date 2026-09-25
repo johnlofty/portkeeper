@@ -29,7 +29,8 @@ process or docker container, and a **Forward** button for each one.
 
 **Stays up by itself.** Dropped connections reconnect with backoff, and mappings are
 replayed onto the new connection. Pinned mappings and image paste come back after a
-restart of the daemon or the Mac.
+restart of the daemon or the Mac. Opening a new version of the app restarts the daemon
+on that version.
 
 **Your ssh config, untouched.** Hosts come from the `Host` entries in `~/.ssh/config`,
 plus any you add in the console. Portkeeper reads that file and never writes it.
@@ -45,11 +46,15 @@ using keys or an agent.
 2. The app is ad-hoc signed, not notarized, so macOS blocks the first launch. Click
    **Open Anyway** in System Settings > Privacy & Security, or run
    `xattr -dr com.apple.quarantine /Applications/Portkeeper.app`.
-3. Click the menu-bar icon, then the gear, then **Background helper > Register**. Approve
-   it in System Settings > General > Login Items if asked. **Daemon** in Settings then
-   reads reachable.
+3. Click the menu-bar icon, then the gear, then **Background daemon > Install**. The app
+   writes a LaunchAgent at `~/Library/LaunchAgents/io.github.johnlofty.portkeeper.plist`
+   that runs the daemon inside the app. **Daemon** in Settings then reads reachable.
 
-To uninstall, click **Unregister** in Settings, quit, and delete the app and
+**Upgrading.** Replace the app in `/Applications` and open it. The app sees that the
+running daemon is a different version and restarts it from the new copy. Mappings that
+are not pinned are dropped by the restart.
+
+To uninstall, click **Uninstall** in Settings, quit, and delete the app and
 `~/.config/portkeeper`.
 
 ## Using it
@@ -181,9 +186,10 @@ The other routes:
 | `make app`         | Builds `build/Portkeeper.app`, with the daemon bundled inside |
 | `make dist`        | Zips the app to `dist/Portkeeper-$(VERSION)-macos-arm64.zip` |
 
-Only one daemon can own `127.0.0.1:9996`. Run `make uninstall` before registering the
-app's helper, or leave the helper unregistered while using the dev agent. The Swift app is
-in `macos/Portkeeper`.
+Only one daemon can own `127.0.0.1:9996`. `make install` and the app share one launchd
+label, so whichever installed last owns the job. The app leaves a job that points into a
+checkout alone; **Install** in its Settings takes it back. The Swift app is in
+`macos/Portkeeper`.
 
 CI runs on a `macos-15` runner for every push and pull request: gofmt, vet,
 `go test -race`, the Swift build and tests, and `make dist`. **Every merged pull request is

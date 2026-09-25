@@ -1430,3 +1430,69 @@ daemon (none appeared here), and images copied as TIFF only from apps other than
   `~/.local/bin/ccimgd`.
 - On `code`, delete `~/.local/bin/ccimg` and `~/.claude/commands/paste-image.md`.
 
+
+## Upgrades restart the daemon (2026-09-25)
+
+Replacing Portkeeper.app never updated the daemon. v0.1.3 was installed while the
+v0.1.2 daemon kept running from `~/.Trash/Portkeeper.app`: launchd does not restart a job
+because its bundle moved. So the new console had no image paste button, and nothing said
+why.
+
+**The first fix exposed the real problem.** The app learned to compare the daemon's
+version (now in `/api/status`, stamped with `-ldflags -X main.version`) with its own, and
+re-register the SMAppService helper on a mismatch. It stopped the old daemon, and the new
+one never started. launchd logged
+`OS_REASON_CODESIGNING | Launch Constraint Violation (Constraint not matched)`, and amfid
+added "adhoc signed or signed by an unknown certificate chain".
+
+The app is ad-hoc signed. When an SMAppService job is first approved, Background Task
+Management stores a launch constraint (LWCR) pinned to the helper's exact **cdhash**.
+Re-registering finds that item (`registerLaunchItem: found existing item`) and keeps the
+constraint. Every new build has a new hash, so no upgrade could ever start the helper.
+A Developer ID signature would pin a Team ID instead and survive updates.
+`sfltool resetbtm` clears the store, but it resets every app's login items and the next
+upgrade breaks the same way.
+
+**Decision: a plain LaunchAgent, written by the app.** `DaemonAgent.swift` writes
+`~/Library/LaunchAgents/io.github.johnlofty.portkeeper.plist`. Its `ProgramArguments` is
+the portkeeperd inside the running bundle, and the app loads it with
+`launchctl bootout` then `bootstrap`. A plain agent carries no launch constraint. The
+label is the one `make install` uses, so there is still exactly one daemon job.
+
+**Once per launch, after the first poll** (whether or not it reached the daemon), a
+release build (bundle version other than 0.0.0) does one of these:
+
+| Job state | Action |
+| --- | --- |
+| Not installed, old helper registered | Install: the user already opted in, and that helper cannot run this build |
+| Not installed, no old helper | Nothing; Install in Settings |
+| Points into a checkout | Nothing; it is a developer's job |
+| Points at another copy of the app | Rewrite it for this copy and restart |
+| This app, daemon not answering, or a different version | Restart |
+
+The old helper is unregistered on the way, and its plist stays in the bundle only so it
+can still be named for that.
+
+**Found while testing it.** The first version waited for a successful status before
+reconciling. With the daemon down, which is exactly the migration case, no status ever
+arrived and nothing happened. `DaemonClient.polls` now counts every poll, and reconcile
+runs on the first one.
+
+**Verified on this Mac,** with local builds in `/Applications`:
+- **Migration:** the v0.1.3 helper was registered and there was no agent. Opening a v0.1.5
+  build had v0.1.5 answering in 2 s, the agent pointing at `/Applications`, and the helper
+  gone (`launchctl print` reported it missing).
+- **Upgrade:** opening v0.1.6 over v0.1.5 had a new daemon PID answering v0.1.6 in 2 s.
+- **Same version:** relaunching v0.1.6 kept the same PID.
+- **Pins** came back after each restart. Unpinned mappings do not, since mappings live in
+  memory.
+
+**Not verified:** a first Install from a clean Mac through the Settings button (only the
+automatic paths ran), and whether the menu-bar app's own login item
+(`SMAppService.mainApp`) has the same hash pinning across upgrades.
+
+**`make app` on this Mac.** `build-app.sh` exports `DEVELOPER_DIR` for Xcode, and cgo
+followed it to Xcode's linker. That linker cannot read the newer Command Line Tools SDK
+("tapi error: malformed file"). The Go step now runs with `env -u DEVELOPER_DIR`. The
+Swift build also failed on a module cache recorded under the repo's old name,
+`local-gateway`, and deleting `.build` fixed it.
