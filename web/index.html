@@ -595,6 +595,8 @@
           <div class="host-note hidden" id="host-note"></div>
         </div>
         <div class="head-btns">
+          <button type="button" class="btn ghost hidden" id="host-paste" aria-pressed="false"
+                  title="Paste a Mac screenshot into Claude Code on this host with Ctrl+V">Image paste</button>
           <button type="button" class="btn ghost hidden" id="host-edit">Edit host</button>
           <button type="button" class="btn ghost hidden" id="host-remove">Remove host</button>
           <button type="button" class="btn primary" id="add-open" title="Add a mapping" aria-label="Add a mapping">
@@ -831,6 +833,7 @@
   var hostListEl = document.getElementById("host-list");
   var addHostBtn = document.getElementById("addhost-open");
   var hostEdit   = document.getElementById("host-edit");
+  var hostPaste  = document.getElementById("host-paste");
   var hostNote   = document.getElementById("host-note");
   var hsheet     = document.getElementById("hsheet");
   var hostForm   = document.getElementById("host-form");
@@ -927,6 +930,9 @@
   // that can change a connection, and on every poll only while some row or host is not
   // healthy, so the ordinary case stays one request per poll.
   var hostHealth = {};
+  // pasteState is /api/image-paste: per host, whether image paste is on and working.
+  // pasteSupported goes false against a daemon that predates it, which hides the button.
+  var pasteState = {}, pasteSupported = false, pasteBusy = false;
   var statusStale = true;
 
   var rowsByKey = new Map();
@@ -1243,10 +1249,17 @@
     }).catch(function () {
       // An older daemon, or no host book: the sidebar falls back to hosts on mappings.
       hostBook = [];
-    }).then(function () {
+    }).then(fetchPaste).then(function () {
       mergeHosts();
       renderAll();
     });
+  }
+
+  function fetchPaste() {
+    return api("GET", API + "/image-paste").then(function (st) {
+      pasteState = (st && typeof st === "object" && !Array.isArray(st)) ? st : {};
+      pasteSupported = true;
+    }).catch(function () { pasteSupported = false; pasteState = {}; });
   }
 
   function fetchStatus() {
@@ -1556,10 +1569,50 @@
     }
     // An incomplete host has nowhere to connect to, so nothing that would connect is offered.
     addOpenBtn.disabled = emptyAdd.disabled = emptyDisc.disabled = !!h.incomplete;
+    var ps = pasteState[selected] || {};
+    if (ps.enabled && (ps.warning || ps.error)) {
+      note = (note ? note + " " : "") + "Image paste: " + (ps.warning || ps.error);
+      warn = true;
+    }
     hostNote.textContent = note;
     hostNote.classList.toggle("warn", warn);
     hostNote.classList.toggle("hidden", !note);
+    paintPaste(h);
   }
+
+  // The image paste button says what is true now, and a click flips it.
+  function paintPaste(h) {
+    hostPaste.classList.toggle("hidden", !pasteSupported);
+    if (!pasteSupported || pasteBusy) return;
+    var ps = pasteState[selected] || {};
+    hostPaste.disabled = !!h.incomplete;
+    hostPaste.setAttribute("aria-pressed", ps.enabled ? "true" : "false");
+    hostPaste.textContent = !ps.enabled ? "Enable image paste"
+      : ps.active ? "Image paste on" : "Image paste reconnecting";
+    hostPaste.title = !ps.enabled
+      ? "Paste a Mac screenshot into Claude Code on " + selected + " with Ctrl+V. Installs a small wl-paste on the host."
+      : "Ctrl+V in Claude Code on " + selected + " pastes the Mac's clipboard image. Click to turn off.";
+  }
+
+  hostPaste.addEventListener("click", function () {
+    var alias = selected;
+    if (!alias || pasteBusy) return;
+    var on = !(pasteState[alias] || {}).enabled;
+    pasteBusy = true;
+    hostPaste.disabled = true;
+    hostPaste.textContent = on ? "Turning on\u2026" : "Turning off\u2026";
+    api("PUT", API + "/hosts/" + encodeURIComponent(alias) + "/image-paste", { enabled: on }).then(function (v) {
+      flash("added", on
+        ? "Image paste is on for " + alias + ". Copy a screenshot, then press Ctrl+V in Claude Code there."
+        : "Image paste is off for " + alias + ".");
+    }).catch(function (err) {
+      flash("error", msgOf(err, "Could not change image paste for " + alias + "."));
+    }).then(function () {
+      pasteBusy = false;
+      // Turning it on may have just connected the host; say so without waiting a poll.
+      return Promise.all([fetchPaste(), fetchStatus()]);
+    }).then(function () { hostPaste.disabled = false; renderAll(); });
+  });
 
   /* ---- rows ---------------------------------------------------------- */
 
@@ -2365,6 +2418,7 @@
         if (!needStatus()) { hostHealth = pruneHealth(); return; }
         return fetchStatus();
       })
+      .then(fetchPaste)
       .then(function () {
         loadedOnce = true;
         mergeHosts();

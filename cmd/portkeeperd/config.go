@@ -50,6 +50,11 @@ type Config struct {
 	// is configuration, not a cache of ssh's internals — see the comment on `pin`.
 	PinnedFile string
 
+	// ImagePasteFile lists the hosts image paste is turned on for; ClipDir holds the
+	// per-host clipboard sockets those hosts' forwards point at. See imagepaste.go.
+	ImagePasteFile string
+	ClipDir        string
+
 	MaxForwards int
 	DefaultTTL  time.Duration
 	ControlPath string
@@ -73,6 +78,10 @@ func loadConfig() (*Config, error) {
 			filepath.Join(home, ".config", "portkeeper", "known_hosts")), home),
 		PinnedFile: expandHome(env("LG_PINNED_FILE",
 			filepath.Join(home, ".config", "portkeeper", "pinned")), home),
+		ImagePasteFile: expandHome(env("LG_IMAGE_PASTE_FILE",
+			filepath.Join(home, ".config", "portkeeper", "image-paste")), home),
+		ClipDir: expandHome(env("LG_CLIP_DIR",
+			filepath.Join(home, ".config", "portkeeper", "clip")), home),
 		MaxForwards: envInt("LG_MAX_FORWARDS", 20),
 		DefaultTTL:  time.Duration(envInt("LG_DEFAULT_TTL", 28800)) * time.Second,
 		ControlPath: expandHome(env("LG_CONTROL_PATH", "~/.ssh/sockets/portkeeper-%r@%h-%p"), home),

@@ -1356,3 +1356,77 @@ first `UserKnownHostsFile` exited 0 and added exactly one line to it, and
 Cancel after a failed first test discards the host, because Cancel means "I did not add
 this"; Keep anyway leaves it. `LG_HOSTS_FILE` set to the old default path turns
 migration off, since migrating the file onto itself would overwrite hosts.conf.
+
+## Image paste (2026-09-25)
+
+Ctrl+V in Claude Code on `code` now attaches the Mac's clipboard image. It replaces a
+private arrangement nobody else could install: `ccimgd` (a binary at `~/.local/bin`, its
+own launchd plist, Homebrew's `pngpaste`), a hand-written `RemoteForward 9998` in
+ssh_config, and a `/paste-image` slash command that cost a model turn per image.
+
+**How Claude Code reads a clipboard.** On Linux it has no clipboard code. Its binary
+(2.1.282) runs `xclip -selection clipboard -t TARGETS -o | grep image/… || wl-paste -l |
+grep …` to ask, then `xclip … -t image/png -o > f || wl-paste --type image/png > f` to
+fetch. No `DISPLAY` check comes first. So the whole feature is: be a `wl-paste` that
+answers those two questions.
+
+**Decisions.**
+
+- **The stand-in is `wl-paste`, not `xclip`.** xclip is tried first, so ours only runs
+  when xclip is missing or fails. It can never shadow a working X11 clipboard.
+- **The daemon reads the pasteboard in process**, with AppKit through cgo
+  (`pasteboard_darwin.go`). Its launchd job already runs in the Aqua session. Both CI and
+  release build on `macos-15`; a `!darwin` stub keeps `go vet` working elsewhere.
+  `osascript -e 'the clipboard as «class PNGf»'` was the alternative: no cgo, but a fork
+  per paste and hex to decode.
+- **A separate server, not a route on 9996.** The README promises nothing on the remote
+  reaches the daemon. The clipboard listener shares no mux or port with the control API
+  and answers exactly `GET`/`HEAD /v1/clipboard/image`: 200 with a PNG, 204, or 413 over
+  20 MB. There is no text route.
+- **Unix sockets at both ends, one per host.** The local socket is
+  `~/.config/portkeeper/clip/<sha256(alias)[:6]>.sock`, hashed to stay under the
+  104-byte sun_path limit. It is per host so each image served is logged against the host
+  that asked. The remote end is `${XDG_RUNTIME_DIR:-$HOME/.cache}/portkeeper/clip.sock`,
+  resolved once per host by asking its shell, since sshd expands nothing in a `-R` path.
+  The resolved path is written into the stand-in, so a later session with a different
+  environment still finds it.
+- **The 0600 mode is checked, not assumed.** It comes from sshd's `StreamLocalBindMask`,
+  which is the host's to change. After each forward the daemon runs `ls -ld` on the
+  socket, and anything but `srw-------` cancels the forward.
+- **Turned on per host, and kept like a pin.** `~/.config/portkeeper/image-paste` lists
+  the hosts. Such a host is dialled at startup and on reconcile outside its backoff
+  window. A master going from down to up (`setHealthy`) marks the forward gone, and the
+  same tick places it again.
+
+**Found while building it.**
+
+- **A leftover socket blocks the bind.** sshd does not unlink it without
+  `StreamLocalBindUnlink yes`, which cannot be asked of a stranger's sshd, so the daemon
+  runs `rm -f` first.
+- **Clearing under a live forward loses the socket.** A second enable ran `rm -f` and
+  then `-O forward`. The master saw a forward it already had, reported success and bound
+  nothing, so the socket was gone. Placement now cancels first, every time.
+- **A `-R` socket forward over the mux works** (`-O forward` and `-O cancel`). Cancel
+  leaves the remote file behind, which is one more reason for the `rm -f`.
+
+**Verified end to end** with a second daemon on 9895, every path under `~/.cache/pkt`.
+- **The paste:** enabling `code` took 4 s. With a 27,660-byte PNG on the Mac pasteboard,
+  Claude Code's own check and save commands on `code` returned the file byte-identical
+  (SHA-1 7419…b3f8). Ctrl+V sent to a real `claude` session in tmux there showed
+  `[Image #1]`, and the stand-in logged `-l`, then `--type image/png`.
+- **No image:** with text on the pasteboard, the check exited 1.
+- **Restarts:** a daemon restart restored the forward unprompted, and killing the master
+  had it re-placed within the next reconcile.
+- **Turning it off** removed the local socket, the setting, the remote socket and the
+  stand-in.
+
+**Not verified:** whether a newer macOS shows a pasteboard-privacy prompt to a background
+daemon (none appeared here), and images copied as TIFF only from apps other than Preview.
+
+**Operator steps outside the repo**, once this build is the installed one:
+
+- Remove `RemoteForward 9998 localhost:9998` from ssh_config.
+- Run `launchctl bootout gui/$(id -u)/com.ccimgd`, then delete its plist and
+  `~/.local/bin/ccimgd`.
+- On `code`, delete `~/.local/bin/ccimg` and `~/.claude/commands/paste-image.md`.
+
