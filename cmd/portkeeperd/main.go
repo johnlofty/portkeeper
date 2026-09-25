@@ -54,6 +54,7 @@ func main() {
 		log.Printf("%d pinned mapping(s) from %s", n, cfg.PinnedFile)
 	}
 	m.paste = newImagePaste(cfg, run, systemPasteboard())
+	m.paste.openLogin = m.openLogin
 	if n := len(m.paste.enabledHosts()); n > 0 {
 		log.Printf("image paste on for %d host(s)", n)
 	}

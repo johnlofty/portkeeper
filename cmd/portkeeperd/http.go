@@ -100,6 +100,8 @@ func newServer(m *manager, cfg *Config) http.Handler {
 	mux.HandleFunc("GET /api/hosts/{alias}/listeners", s.hostListeners)
 	mux.HandleFunc("GET /api/image-paste", s.imagePasteList)
 	mux.HandleFunc("PUT /api/hosts/{alias}/image-paste", s.imagePasteSet)
+	mux.HandleFunc("GET /api/browser-login", s.browserLoginList)
+	mux.HandleFunc("PUT /api/hosts/{alias}/browser-login", s.browserLoginSet)
 	mux.HandleFunc("GET /api/status", s.status)
 	mux.HandleFunc("GET /api/forwards", s.list)
 	mux.HandleFunc("POST /api/forward", s.open)
@@ -768,4 +770,69 @@ func (s *server) imagePasteSet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, s.m.paste.view(alias))
+}
+
+// browserLoginList reports, per host, whether browser login is on and working.
+func (s *server) browserLoginList(w http.ResponseWriter, r *http.Request) {
+	if s.m.paste == nil {
+		writeJSON(w, http.StatusOK, map[string]loginView{})
+		return
+	}
+	writeJSON(w, http.StatusOK, s.m.paste.loginViews())
+}
+
+// browserLoginSet turns browser login on or off for one host: the stand-ins on the host
+// and the /v1/open route on its channel.
+func (s *server) browserLoginSet(w http.ResponseWriter, r *http.Request) {
+	alias, on, ok := s.readToggle(w, r)
+	if !ok {
+		return
+	}
+	if !on {
+		if err := s.m.paste.disableLogin(alias, s.m.isHealthy(alias)); err != nil {
+			writeErr(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, s.m.paste.loginView(alias))
+		return
+	}
+	if err := s.m.ensureUp(alias); err != nil {
+		writeErr(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	if err := s.m.paste.enableLogin(alias); err != nil {
+		writeErr(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, s.m.paste.loginView(alias))
+}
+
+// readToggle is the shared front half of the per-host feature switches.
+func (s *server) readToggle(w http.ResponseWriter, r *http.Request) (string, bool, bool) {
+	alias := strings.TrimSpace(r.PathValue("alias"))
+	if !safeAlias.MatchString(alias) {
+		writeErr(w, http.StatusBadRequest, errBadAlias.Error())
+		return "", false, false
+	}
+	if s.m.book == nil || !s.m.book.Known(alias) {
+		writeErr(w, http.StatusBadRequest, errUnknownHost.Error())
+		return "", false, false
+	}
+	if s.m.paste == nil {
+		writeErr(w, http.StatusServiceUnavailable, "host features are not available in this daemon")
+		return "", false, false
+	}
+	body, err := readAndRestore(r)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "body too large")
+		return "", false, false
+	}
+	var in struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err := json.Unmarshal(body, &in); err != nil || in.Enabled == nil {
+		writeErr(w, http.StatusBadRequest, `body must be {"enabled": true|false}`)
+		return "", false, false
+	}
+	return alias, *in.Enabled, true
 }

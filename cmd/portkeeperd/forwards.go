@@ -266,6 +266,9 @@ type openReq struct {
 	remoteHost string // local-forward only; empty means the remote's localhost
 	remotePort int
 	localPort  int // 0 means "unset"; required for a remote-forward
+	// exactLocal makes localPort binding: no fallback to another free port. A login's
+	// callback port is written into the URL the browser is sent to, so no other will do.
+	exactLocal bool
 	label      string
 	ttl        time.Duration
 	requester  string
@@ -698,11 +701,18 @@ func (m *manager) Open(r openReq) (forwardView, bool, error) {
 			preferred = r.localPort
 		}
 		var err error
-		local, err = allocLocalPort(preferred,
-			func(p int) bool { return !taken[p] && m.free(p) },
-			m.pick)
-		if err != nil {
-			return forwardView{}, false, fmt.Errorf("no local port available: %w", err)
+		if r.exactLocal {
+			if err := exactLocalFree(preferred, taken, m.free); err != nil {
+				return forwardView{}, false, err
+			}
+			local = preferred
+		} else {
+			local, err = allocLocalPort(preferred,
+				func(p int) bool { return !taken[p] && m.free(p) },
+				m.pick)
+			if err != nil {
+				return forwardView{}, false, fmt.Errorf("no local port available: %w", err)
+			}
 		}
 	}
 
@@ -1022,6 +1032,7 @@ func (m *manager) reconcile() {
 		m.replay(h)
 	}
 	m.reap(checkRemote)
+	m.reapLogins()
 
 	// Last, and after the reap: a pin whose mapping was just dropped as vanished is
 	// re-created here, in the same tick, rather than a further thirty seconds later.

@@ -598,6 +598,8 @@
         <div class="head-btns">
           <button type="button" class="btn ghost hidden" id="host-paste" aria-pressed="false"
                   title="Paste a Mac screenshot into Claude Code on this host with Ctrl+V">Image paste</button>
+          <button type="button" class="btn ghost hidden" id="host-login" aria-pressed="false"
+                  title="Open sign-in pages from this host in your Mac's browser">Browser login</button>
           <button type="button" class="btn ghost hidden" id="host-edit">Edit host</button>
           <button type="button" class="btn ghost hidden" id="host-remove">Remove host</button>
           <button type="button" class="btn primary" id="add-open" title="Add a mapping" aria-label="Add a mapping">
@@ -835,6 +837,7 @@
   var addHostBtn = document.getElementById("addhost-open");
   var hostEdit   = document.getElementById("host-edit");
   var hostPaste  = document.getElementById("host-paste");
+  var hostLogin  = document.getElementById("host-login");
   var hostNote   = document.getElementById("host-note");
   var hsheet     = document.getElementById("hsheet");
   var hostForm   = document.getElementById("host-form");
@@ -935,6 +938,8 @@
   // pasteState is /api/image-paste: per host, whether image paste is on and working.
   // pasteSupported goes false against a daemon that predates it, which hides the button.
   var pasteState = {}, pasteSupported = false, pasteBusy = false;
+  // loginState is /api/browser-login, the same shape, for browser login.
+  var loginState = {}, loginSupported = false, loginBusy = false;
   var statusStale = true;
 
   var rowsByKey = new Map();
@@ -1258,10 +1263,15 @@
   }
 
   function fetchPaste() {
-    return api("GET", API + "/image-paste").then(function (st) {
+    var paste = api("GET", API + "/image-paste").then(function (st) {
       pasteState = (st && typeof st === "object" && !Array.isArray(st)) ? st : {};
       pasteSupported = true;
     }).catch(function () { pasteSupported = false; pasteState = {}; });
+    var login = api("GET", API + "/browser-login").then(function (st) {
+      loginState = (st && typeof st === "object" && !Array.isArray(st)) ? st : {};
+      loginSupported = true;
+    }).catch(function () { loginSupported = false; loginState = {}; });
+    return Promise.all([paste, login]);
   }
 
   function fetchStatus() {
@@ -1581,11 +1591,49 @@
       note = (note ? note + " " : "") + "Image paste: " + (ps.warning || ps.error);
       warn = true;
     }
+    var ls = loginState[selected] || {};
+    if (ls.enabled && (ls.warning || ls.error)) {
+      note = (note ? note + " " : "") + "Browser login: " + (ls.warning || ls.error);
+      warn = true;
+    }
     hostNote.textContent = note;
     hostNote.classList.toggle("warn", warn);
     hostNote.classList.toggle("hidden", !note);
     paintPaste(h);
+    paintLogin(h);
   }
+
+  function paintLogin(h) {
+    hostLogin.classList.toggle("hidden", !loginSupported);
+    if (!loginSupported || loginBusy) return;
+    var ls = loginState[selected] || {};
+    hostLogin.disabled = !!h.incomplete;
+    hostLogin.setAttribute("aria-pressed", ls.enabled ? "true" : "false");
+    hostLogin.textContent = !ls.enabled ? "Enable browser login"
+      : ls.active ? "Browser login on" : "Browser login reconnecting";
+    hostLogin.title = !ls.enabled
+      ? "Open sign-in pages from " + selected + " (aws sso login, gcloud, az, gh...) in your Mac's browser, and forward the login's callback port back. Installs xdg-open and www-browser on the host."
+      : "Logins on " + selected + " open in this Mac's browser. Python tools run without a terminal also need: export BROWSER=portkeeper-open. Click to turn off.";
+  }
+
+  hostLogin.addEventListener("click", function () {
+    var alias = selected;
+    if (!alias || loginBusy) return;
+    var on = !(loginState[alias] || {}).enabled;
+    loginBusy = true;
+    hostLogin.disabled = true;
+    hostLogin.textContent = on ? "Turning on\u2026" : "Turning off\u2026";
+    api("PUT", API + "/hosts/" + encodeURIComponent(alias) + "/browser-login", { enabled: on }).then(function () {
+      flash("added", on
+        ? "Browser login is on for " + alias + ". Run a login there, such as aws sso login, and it opens here."
+        : "Browser login is off for " + alias + ".");
+    }).catch(function (err) {
+      flash("error", msgOf(err, "Could not change browser login for " + alias + "."));
+    }).then(function () {
+      loginBusy = false;
+      return Promise.all([fetchPaste(), fetchStatus()]);
+    }).then(function () { hostLogin.disabled = false; renderAll(); });
+  });
 
   // The image paste button says what is true now, and a click flips it.
   function paintPaste(h) {

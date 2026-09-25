@@ -156,6 +156,7 @@ func testPaste(t *testing.T, sr *scriptRunner) *imagePaste {
 	dir := shortDir(t)
 	cfg.ClipDir = filepath.Join(dir, "clip")
 	cfg.ImagePasteFile = filepath.Join(dir, "image-paste")
+	cfg.BrowserLoginFile = filepath.Join(dir, "browser-login")
 	p := newImagePaste(cfg, sr, &fakePasteboard{})
 	t.Cleanup(p.shutdown)
 	return p
@@ -340,7 +341,7 @@ func TestShimAgainstRealSocket(t *testing.T) {
 	}
 	dir := shortDir(t)
 	pb := &fakePasteboard{}
-	srv, err := startClipServer(filepath.Join(dir, "c.sock"), "code", &clipSource{pb: pb})
+	srv, err := startClipServer(filepath.Join(dir, "c.sock"), clipHandler("code", &clipSource{pb: pb}))
 	if err != nil {
 		t.Fatal(err)
 	}
