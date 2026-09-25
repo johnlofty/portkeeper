@@ -91,12 +91,13 @@ func TestConsoleCarriesTheNewControls(t *testing.T) {
 
 // The console's vocabulary is the design's: mappings are added, forwarded and kept across
 // restarts. The retired words must not creep back, and neither may any trace of the login
-// the daemon no longer has.
+// the daemon no longer has. "Browser login" is a host feature, not that login, so the
+// check looks for the old login screen's own markers rather than the bare word.
 func TestConsoleVocabulary(t *testing.T) {
 	h, _, _ := testServer(t)
 	body := do(t, h, "GET", "/", "").Body.String()
 
-	for _, gone := range []string{"Patch", "password", "login", "credentials", "expose"} {
+	for _, gone := range []string{"Patch", "password", `id="login"`, "Log out", "logout", "/admin", "credentials", "expose"} {
 		if strings.Contains(body, gone) {
 			t.Errorf("the console still says %q", gone)
 		}

@@ -132,7 +132,7 @@ type clipServer struct {
 	srv  *http.Server
 }
 
-func startClipServer(path, host string, src *clipSource) (*clipServer, error) {
+func startClipServer(path string, h http.Handler) (*clipServer, error) {
 	if len(path) > sunPathMax {
 		return nil, fmt.Errorf("clipboard socket path %s is longer than %d bytes", path, sunPathMax)
 	}
@@ -153,7 +153,7 @@ func startClipServer(path, host string, src *clipSource) (*clipServer, error) {
 		return nil, err
 	}
 	s := &clipServer{path: path, ln: ln, srv: &http.Server{
-		Handler:           clipHandler(host, src),
+		Handler:           h,
 		ReadHeaderTimeout: 5 * time.Second,
 		WriteTimeout:      30 * time.Second,
 	}}
@@ -196,19 +196,23 @@ func remotePrepareCmd(sock string) string {
 
 func remoteStatCmd(sock string) string { return fmt.Sprintf(`ls -ld '%s'`, sock) }
 
-func remoteRemoveCmd(sock string) string {
-	return fmt.Sprintf(`rm -f '%s'; f="$HOME/.local/bin/wl-paste"; `+
-		`if [ -f "$f" ] && grep -q %s "$f"; then rm -f "$f"; fi`, sock, shimMarker)
+func remoteRemoveCmd(sock string) string { return fmt.Sprintf(`rm -f '%s'`, sock) }
+
+// removeShimCmd deletes ~/.local/bin/<name> only when it is one of ours.
+func removeShimCmd(name string) string {
+	return fmt.Sprintf(`f="$HOME/.local/bin/%s"; if [ -f "$f" ] && grep -q %s "$f"; then rm -f "$f"; fi`, name, shimMarker)
 }
 
 // installShimCmd writes the stand-in from stdin. It refuses to replace a wl-paste that
 // is not ours, then reports where a login shell finds wl-paste, so a PATH that misses
 // ~/.local/bin is caught at install time rather than as a paste that silently does nothing.
-const installShimCmd = `set -e; d="$HOME/.local/bin"; f="$d/wl-paste"; ` +
-	`if [ -e "$f" ] && ! grep -q ` + shimMarker + ` "$f"; then ` +
-	`echo "$f exists and is not Portkeeper's; leaving it alone" >&2; exit 3; fi; ` +
-	`mkdir -p "$d"; cat > "$f.portkeeper-tmp"; chmod 755 "$f.portkeeper-tmp"; mv "$f.portkeeper-tmp" "$f"; ` +
-	`echo "shim=$f"; echo "found=$("${SHELL:-/bin/sh}" -lc 'command -v wl-paste' 2>/dev/null </dev/null | tail -n 1)"`
+func installShimCmd(name string) string {
+	return fmt.Sprintf(`set -e; d="$HOME/.local/bin"; f="$d/%[1]s"; `+
+		`if [ -e "$f" ] && ! grep -q %[2]s "$f"; then `+
+		`echo "$f exists and is not Portkeeper's; leaving it alone" >&2; exit 3; fi; `+
+		`mkdir -p "$d"; cat > "$f.portkeeper-tmp"; chmod 755 "$f.portkeeper-tmp"; mv "$f.portkeeper-tmp" "$f"; `+
+		`echo "shim=$f"; echo "found=$("${SHELL:-/bin/sh}" -lc 'command -v %[1]s' 2>/dev/null </dev/null | tail -n 1)"`, name, shimMarker)
+}
 
 // shimScript is the stand-in. POSIX sh and curl only, so it runs on any box that has
 // both. Anything that is not a question about a PNG goes to a real wl-paste when there is
@@ -275,21 +279,31 @@ type pasteHost struct {
 	remoteSock string // resolved once per daemon run; empty until then
 	placed     bool   // the forward is on the current master
 	err        string
-	warn       string
+	warn       string // image paste's PATH warning
+	loginWarn  string // browser login's
 }
 
-// imagePaste owns every host's clipboard socket and forward.
+// imagePaste owns every host's channel: one unix socket per host, forwarded over its
+// master, that the host's stand-ins talk to. It carries two features, each turned on per
+// host: image paste (GET /v1/clipboard/image, for wl-paste) and browser login
+// (POST /v1/open, for xdg-open and friends; see browserlogin.go). The socket is forwarded
+// while either is on, and each route answers only while its own feature is.
 type imagePaste struct {
 	cfg *Config
 	run runner
 	src *clipSource
+
+	// openLogin handles POST /v1/open; the manager sets it. Nil means browser login is
+	// not wired, and the route answers 404.
+	openLogin func(host, url string) (openResult, error)
 
 	// opMu serialises the slow work (ssh round trips) so that the reconcile loop and a
 	// click in the console never place the same forward twice at once.
 	opMu sync.Mutex
 
 	mu      sync.Mutex
-	enabled map[string]bool // persisted in cfg.ImagePasteFile
+	enabled map[string]bool // image paste, persisted in cfg.ImagePasteFile
+	login   map[string]bool // browser login, persisted in cfg.BrowserLoginFile
 	hosts   map[string]*pasteHost
 }
 
@@ -299,10 +313,14 @@ func newImagePaste(cfg *Config, run runner, pb pasteboard) *imagePaste {
 		run:     run,
 		src:     &clipSource{pb: pb},
 		enabled: map[string]bool{},
+		login:   map[string]bool{},
 		hosts:   map[string]*pasteHost{},
 	}
 	for _, h := range readPasteHosts(cfg.ImagePasteFile) {
 		p.enabled[h] = true
+	}
+	for _, h := range readPasteHosts(cfg.BrowserLoginFile) {
+		p.login[h] = true
 	}
 	return p
 }
@@ -332,23 +350,30 @@ func readPasteHosts(path string) []string {
 }
 
 func (p *imagePaste) saveLocked() error {
-	if p.cfg.ImagePasteFile == "" {
+	if err := saveHostSet(p.cfg.ImagePasteFile, p.enabled); err != nil {
+		return err
+	}
+	return saveHostSet(p.cfg.BrowserLoginFile, p.login)
+}
+
+func saveHostSet(path string, set map[string]bool) error {
+	if path == "" {
 		return nil
 	}
-	list := make([]string, 0, len(p.enabled))
-	for h := range p.enabled {
+	list := make([]string, 0, len(set))
+	for h := range set {
 		list = append(list, h)
 	}
 	sort.Strings(list)
 	b, _ := json.MarshalIndent(list, "", "  ")
-	if err := os.MkdirAll(filepath.Dir(p.cfg.ImagePasteFile), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	tmp := p.cfg.ImagePasteFile + ".tmp"
+	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, append(b, '\n'), 0o600); err != nil {
 		return err
 	}
-	return os.Rename(tmp, p.cfg.ImagePasteFile)
+	return os.Rename(tmp, path)
 }
 
 func (p *imagePaste) hostLocked(host string) *pasteHost {
@@ -367,21 +392,67 @@ func (p *imagePaste) localSock(host string) string {
 	return filepath.Join(p.cfg.ClipDir, hex.EncodeToString(sum[:6])+".sock")
 }
 
+// isEnabled is image paste; loginOn is browser login; wanted is either, which is what
+// keeps the host's channel forwarded.
 func (p *imagePaste) isEnabled(host string) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.enabled[host]
 }
 
+func (p *imagePaste) loginOn(host string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.login[host]
+}
+
+func (p *imagePaste) wanted(host string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.enabled[host] || p.login[host]
+}
+
+// enabledHosts is every host whose channel should be up, for the reconcile loop.
 func (p *imagePaste) enabledHosts() []string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	out := make([]string, 0, len(p.enabled))
+	seen := map[string]bool{}
 	for h := range p.enabled {
+		seen[h] = true
+	}
+	for h := range p.login {
+		seen[h] = true
+	}
+	out := make([]string, 0, len(seen))
+	for h := range seen {
 		out = append(out, h)
 	}
 	sort.Strings(out)
 	return out
+}
+
+// channelHandler serves one host's socket. Each route answers only while its feature is
+// on for that host; otherwise it is a 404, as if it did not exist.
+func (p *imagePaste) channelHandler(host string) http.Handler {
+	clip := clipHandler(host, p.src)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case clipRoute:
+			if !p.isEnabled(host) {
+				http.NotFound(w, r)
+				return
+			}
+			clip.ServeHTTP(w, r)
+		case openRoute:
+			if !p.loginOn(host) || p.openLogin == nil {
+				http.NotFound(w, r)
+				return
+			}
+			serveOpen(w, r, host, p.openLogin)
+		default:
+			http.NotFound(w, r)
+		}
+	})
 }
 
 // masterUp is told whenever a host's master (re)connects. A forward lives on a master,
@@ -423,7 +494,7 @@ func (p *imagePaste) enable(host string) error {
 		p.setErr(host, err)
 		return err
 	}
-	warn, err := p.installShim(host, sock)
+	warn, err := p.installShim(host, "wl-paste", shimFor(sock))
 	if err != nil {
 		p.setErr(host, err)
 		return err
@@ -446,28 +517,45 @@ func (p *imagePaste) enable(host string) error {
 // here; its master will not carry the forward again, and the stand-in without a socket
 // behind it just fails the way a missing wl-paste would.
 func (p *imagePaste) disable(host string, reachable bool) error {
+	return p.turnOff(host, reachable, p.enabled, []string{"wl-paste"}, "image paste")
+}
+
+// turnOff drops one feature from a host: its setting, its stand-ins, and, when no
+// feature is left on, the whole channel -- forward, remote socket and local socket.
+func (p *imagePaste) turnOff(host string, reachable bool, set map[string]bool, shims []string, what string) error {
 	p.opMu.Lock()
 	defer p.opMu.Unlock()
 
 	p.mu.Lock()
-	delete(p.enabled, host)
+	delete(set, host)
 	saveErr := p.saveLocked()
 	ph := p.hosts[host]
-	delete(p.hosts, host)
+	last := !p.enabled[host] && !p.login[host]
+	if last {
+		delete(p.hosts, host)
+	}
 	p.mu.Unlock()
 	if saveErr != nil {
-		logf("image paste: could not save %s: %v", p.cfg.ImagePasteFile, saveErr)
+		logf("%s: could not save settings: %v", what, saveErr)
 	}
-	if ph == nil {
-		return nil
-	}
+
 	var err error
+	if reachable {
+		for _, name := range shims {
+			if _, rerr := p.run.run(p.cfg.sshArgv(host, removeShimCmd(name))); rerr != nil && err == nil {
+				err = fmt.Errorf("%s is off, but removing %s on %s failed: %w", what, name, host, rerr)
+			}
+		}
+	}
+	if !last || ph == nil {
+		return err
+	}
 	if reachable && ph.remoteSock != "" {
 		if ph.placed && ph.srv != nil {
 			p.run.run(p.cfg.sshArgv("-O", "cancel", "-R", ph.remoteSock+":"+ph.srv.path, host))
 		}
-		if _, rerr := p.run.run(p.cfg.sshArgv(host, remoteRemoveCmd(ph.remoteSock))); rerr != nil {
-			err = fmt.Errorf("image paste is off, but cleaning up on %s failed: %w", host, rerr)
+		if _, rerr := p.run.run(p.cfg.sshArgv(host, remoteRemoveCmd(ph.remoteSock))); rerr != nil && err == nil {
+			err = fmt.Errorf("%s is off, but cleaning up on %s failed: %w", what, host, rerr)
 		}
 	}
 	if ph.srv != nil {
@@ -479,12 +567,12 @@ func (p *imagePaste) disable(host string, reachable bool) error {
 // ensure places a host's forward if its master is up and does not carry one. It is what
 // the reconcile loop calls after a master comes back.
 func (p *imagePaste) ensure(host string) {
-	if !p.isEnabled(host) || p.isPlaced(host) {
+	if !p.wanted(host) || p.isPlaced(host) {
 		return
 	}
 	p.opMu.Lock()
 	defer p.opMu.Unlock()
-	if !p.isEnabled(host) || p.isPlaced(host) {
+	if !p.wanted(host) || p.isPlaced(host) {
 		return
 	}
 	err := p.placeLocked(host)
@@ -524,17 +612,17 @@ func (p *imagePaste) resolveRemoteSock(host string) (string, error) {
 
 // installShim writes the stand-in and returns a warning when a login shell on the host
 // would not find it.
-func (p *imagePaste) installShim(host, sock string) (string, error) {
+func (p *imagePaste) installShim(host, name, content string) (string, error) {
 	ir, ok := p.run.(inputRunner)
 	if !ok {
 		return "", errPasteNoRunner
 	}
-	out, err := ir.runInput(p.cfg.sshArgv(host, installShimCmd), shimFor(sock))
+	out, err := ir.runInput(p.cfg.sshArgv(host, installShimCmd(name)), content)
 	if err != nil {
 		if msg := lastLine(out); msg != "" {
-			return "", fmt.Errorf("could not install wl-paste on %s: %s", host, msg)
+			return "", fmt.Errorf("could not install %s on %s: %s", name, host, msg)
 		}
-		return "", fmt.Errorf("could not install wl-paste on %s: %w", host, err)
+		return "", fmt.Errorf("could not install %s on %s: %w", name, host, err)
 	}
 	var shim, found string
 	for _, line := range strings.Split(out, "\n") {
@@ -549,7 +637,7 @@ func (p *imagePaste) installShim(host, sock string) (string, error) {
 		if found == "" {
 			found = "nothing"
 		}
-		return fmt.Sprintf("A login shell on %s finds %s for wl-paste, not %s. Put ~/.local/bin on PATH before other directories.", host, found, shim), nil
+		return fmt.Sprintf("A login shell on %s finds %s for %s, not %s. Put ~/.local/bin on PATH before other directories.", host, found, name, shim), nil
 	}
 	return "", nil
 }
@@ -567,7 +655,7 @@ func (p *imagePaste) placeLocked(host string) error {
 	srv := ph.srv
 	p.mu.Unlock()
 	if srv == nil {
-		srv, err = startClipServer(p.localSock(host), host, p.src)
+		srv, err = startClipServer(p.localSock(host), p.channelHandler(host))
 		if err != nil {
 			return fmt.Errorf("could not open the local clipboard socket: %w", err)
 		}
@@ -609,24 +697,28 @@ func (p *imagePaste) placeLocked(host string) error {
 	if mode := strings.Fields(lastLine(out)); len(mode) == 0 || mode[0] != "srw-------" {
 		p.run.run(p.cfg.sshArgv("-O", "cancel", "-R", spec, host))
 		p.run.run(p.cfg.sshArgv(host, remoteRemoveCmd(sock)))
-		return fmt.Errorf("%s created the clipboard socket readable by other users (%s); image paste stays off there", host, strings.TrimSpace(lastLine(out)))
+		return fmt.Errorf("%s created the Portkeeper socket readable by other users (%s); it stays off there", host, strings.TrimSpace(lastLine(out)))
 	}
 
 	p.mu.Lock()
 	ph.placed = true
 	p.mu.Unlock()
-	logf("image paste %s: forwarded %s", host, sock)
+	logf("host channel %s: forwarded %s", host, sock)
 	return nil
 }
 
 // forget drops a host that is being removed from the book, cleaning up on it when it
 // can still be reached.
 func (p *imagePaste) forget(host string, reachable bool) {
-	if !p.isEnabled(host) {
-		return
+	if p.loginOn(host) {
+		if err := p.disableLogin(host, reachable); err != nil {
+			logf("browser login %s: %v", host, err)
+		}
 	}
-	if err := p.disable(host, reachable); err != nil {
-		logf("image paste %s: %v", host, err)
+	if p.isEnabled(host) {
+		if err := p.disable(host, reachable); err != nil {
+			logf("image paste %s: %v", host, err)
+		}
 	}
 }
 

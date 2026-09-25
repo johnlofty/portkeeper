@@ -1496,3 +1496,73 @@ followed it to Xcode's linker. That linker cannot read the newer Command Line To
 ("tapi error: malformed file"). The Go step now runs with `env -u DEVELOPER_DIR`. The
 Swift build also failed on a module cache recorded under the repo's old name,
 `local-gateway`, and deleting `.build` fixed it.
+
+## Browser login (2026-09-25)
+
+CLI logins on a remote host now open in the Mac's browser and finish on the host. This
+covers `aws sso login` and any other tool that opens a browser.
+
+**The decision.** "Retiring the control channel" said no process on `code` can make a
+port appear on the Mac without a human at the console, and that this comes back only as
+a decision with its own threat model. This is that decision, kept narrow:
+
+- **https only**, and only for **trusted sign-in providers**: `defaultProviders` covers AWS
+  IAM Identity Center, Google, Microsoft, GitHub and HashiCorp.
+- **A loopback callback gets one local-forward** of exactly the port in its
+  `redirect_uri`. Hosts are `127.0.0.1`, `localhost` or `[::1]`, with an explicit port and
+  no fallback (`openReq.exactLocal`). It has a 10-minute TTL and at most 3 per host, and it
+  is closed as soon as the tool stops listening (`reapLogins`, one `ss` per host per tick).
+- **Never** a remote-forward, the 9996 API, a non-https URL, or an untrusted page.
+- **Per-host opt-in** (`~/.config/portkeeper/browser-login`), with every request logged.
+
+A process running as you on the host already has every token cache there and your shell.
+What this adds is "open a trusted provider's page on the Mac" and "one loopback port for a
+few minutes", and both are less than it has.
+
+**How tools are caught.** Linux CLIs open a browser through `BROWSER`, `xdg-open` or
+`www-browser`. One POSIX `sh` script is installed under all three names:
+
+- `xdg-open` catches Go's `pkg/browser`, Node's `open`, Rust tools and scripts;
+- `www-browser` catches Python's `webbrowser` when there is no display and `TERM` is set;
+- `portkeeper-open` is the target of an explicit `BROWSER`.
+
+Python's `webbrowser` never tries `xdg-open` without a display (it is registered only in
+the `DISPLAY` branch). So a Python tool with no `TERM` needs `BROWSER`, and `TERM` is empty
+in a non-interactive ssh command. The script sends `POST /v1/open` and exits at once,
+because `GenericBrowser.open` returns `not p.wait()`.
+
+**The host channel.** Image paste's per-host socket now carries both routes. It stays
+forwarded while either feature is on, and each route 404s while its own feature is off.
+Turning one feature off removes only its stand-ins.
+
+**Verified on `code`** with an isolated daemon on 9895:
+
+- **Device code:** `aws sso login --profile workload-dev` uses a legacy `sso_start_url`
+  profile, so it gets the device flow. The page opened on the Mac, one click logged in, and
+  `sts get-caller-identity` answered.
+- **Loopback:** for `aws sso login --profile dev` (an `sso_session`), the daemon logged
+  "callback port 37265 forwarded" before `open`. After the click the CLI printed success,
+  and the forward was dropped 21 s later, when port 37265 closed on the host.
+- **Refusals:** `xdg-open https://example.com/` and a crafted
+  `https://evil.com/?redirect_uri=http://127.0.0.1:2222/` were refused, and the reason was
+  printed on the host.
+- **Python:** `webbrowser.get()` in the CLI's Python picked `www-browser`.
+- **Console:** the toggle turned it off and on again in headless Chromium, and off removed
+  all three stand-ins.
+- **Tests:** real `sh` runs of the stand-in, the URL parser against aws, gcloud, Microsoft
+  and wrapped URLs, and the policy, the busy port, the per-host cap and the reaper.
+
+**Not built yet** (from the design doc):
+
+- Asking before opening an untrusted provider, with a Mac notification carrying Open and
+  Always trust. Untrusted providers are refused for now.
+- An editable trusted-provider list.
+- An "other links: ask" mode.
+- Renaming `clip.sock` to `host.sock`.
+
+**Not verified:**
+
+- gcloud, az, gh, terraform, and Go or Node tools through `xdg-open`.
+- `localhost` redirects over IPv6. The forward binds `127.0.0.1` only, because
+  `dirLocal.spec()` pins the Mac side to IPv4; Chrome and Safari fall back from `::1` to
+  `127.0.0.1` when it is refused.

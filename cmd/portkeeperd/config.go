@@ -52,8 +52,9 @@ type Config struct {
 
 	// ImagePasteFile lists the hosts image paste is turned on for; ClipDir holds the
 	// per-host clipboard sockets those hosts' forwards point at. See imagepaste.go.
-	ImagePasteFile string
-	ClipDir        string
+	ImagePasteFile   string
+	BrowserLoginFile string
+	ClipDir          string
 
 	MaxForwards int
 	DefaultTTL  time.Duration
@@ -80,6 +81,8 @@ func loadConfig() (*Config, error) {
 			filepath.Join(home, ".config", "portkeeper", "pinned")), home),
 		ImagePasteFile: expandHome(env("LG_IMAGE_PASTE_FILE",
 			filepath.Join(home, ".config", "portkeeper", "image-paste")), home),
+		BrowserLoginFile: expandHome(env("LG_BROWSER_LOGIN_FILE",
+			filepath.Join(home, ".config", "portkeeper", "browser-login")), home),
 		ClipDir: expandHome(env("LG_CLIP_DIR",
 			filepath.Join(home, ".config", "portkeeper", "clip")), home),
 		MaxForwards: envInt("LG_MAX_FORWARDS", 20),
