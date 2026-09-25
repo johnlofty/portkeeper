@@ -331,10 +331,11 @@ type hostHealthView struct {
 }
 
 type manager struct {
-	cfg  *Config
-	run  runner
-	book *hostBook
-	pins *pinBook
+	cfg   *Config
+	run   runner
+	book  *hostBook
+	pins  *pinBook
+	paste *imagePaste // nil in tests that do not exercise image paste
 
 	// selfPort is the daemon's own listen port, parsed from cfg.Listen once. No forward
 	// may use it as its local port; see errSelfForward. 0 if Listen has no usable port,
@@ -399,6 +400,11 @@ func (m *manager) setHealthy(host string, ok bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	hs := m.hostStateLocked(host)
+	if ok && !hs.healthy && m.paste != nil {
+		// Down (or never seen) to up is a new master, and a new master carries none of
+		// the forwards the old one had; image paste places its own again.
+		m.paste.masterUp(host)
+	}
 	hs.healthy = ok
 	if ok {
 		hs.attempts = 0
@@ -550,6 +556,7 @@ func (m *manager) Start() {
 	// hosts are lazy", and the right one: the operator has said they want that mapping
 	// to exist whether or not anyone asks for it today.
 	m.ensurePins()
+	m.ensureImagePaste()
 }
 
 // install runs one `ssh -O forward` and decides whether it worked. See
@@ -1019,6 +1026,29 @@ func (m *manager) reconcile() {
 	// Last, and after the reap: a pin whose mapping was just dropped as vanished is
 	// re-created here, in the same tick, rather than a further thirty seconds later.
 	m.ensurePins()
+	m.ensureImagePaste()
+}
+
+// ensureImagePaste brings up every host image paste is on for and puts its clipboard
+// forward back on a master that lost it. Like a pin, turning image paste on says the
+// operator wants that host connected, so a host with no master yet is dialled here --
+// outside its backoff window, the same as the loop treats any other host.
+func (m *manager) ensureImagePaste() {
+	if m.paste == nil {
+		return
+	}
+	for _, h := range m.paste.enabledHosts() {
+		if !m.isHealthy(h) {
+			if m.backingOff(h) {
+				continue
+			}
+			if err := m.ensureUp(h); err != nil {
+				m.paste.setErr(h, err)
+				continue
+			}
+		}
+		m.paste.ensure(h)
+	}
 }
 
 // markDown records that a host is still unreachable without touching the retry
@@ -1197,6 +1227,9 @@ func (m *manager) Shutdown() {
 	for _, f := range fs {
 		m.uninstall(f)
 	}
+	if m.paste != nil {
+		m.paste.shutdown()
+	}
 	for _, h := range m.liveMasters() {
 		m.masterFor(h).stop()
 	}
@@ -1257,6 +1290,11 @@ func (m *manager) restartHost(host string) {
 // forgetHost stops a removed host's master and drops everything the manager knew about
 // it. The caller has already made sure nothing depends on it.
 func (m *manager) forgetHost(host string) {
+	// Image paste first, while the master can still reach the host to remove the
+	// wl-paste stand-in and the remote socket.
+	if m.paste != nil {
+		m.paste.forget(host, m.isHealthy(host))
+	}
 	m.mu.Lock()
 	mc, ok := m.masters[host]
 	delete(m.masters, host)

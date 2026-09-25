@@ -98,6 +98,8 @@ func newServer(m *manager, cfg *Config) http.Handler {
 	mux.HandleFunc("POST /api/hosts/{alias}/test", s.testHost)
 	mux.HandleFunc("GET /api/identities", s.identities)
 	mux.HandleFunc("GET /api/hosts/{alias}/listeners", s.hostListeners)
+	mux.HandleFunc("GET /api/image-paste", s.imagePasteList)
+	mux.HandleFunc("PUT /api/hosts/{alias}/image-paste", s.imagePasteSet)
 	mux.HandleFunc("GET /api/status", s.status)
 	mux.HandleFunc("GET /api/forwards", s.list)
 	mux.HandleFunc("POST /api/forward", s.open)
@@ -707,4 +709,62 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 
 func writeErr(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]string{"error": msg})
+}
+
+// imagePasteList reports, per host, whether image paste is on and working.
+func (s *server) imagePasteList(w http.ResponseWriter, r *http.Request) {
+	if s.m.paste == nil {
+		writeJSON(w, http.StatusOK, map[string]pasteView{})
+		return
+	}
+	writeJSON(w, http.StatusOK, s.m.paste.views())
+}
+
+// imagePasteSet turns image paste on or off for one host. Turning it on connects the
+// host, installs the wl-paste stand-in there and places the clipboard forward, all
+// before answering, so the console can say at once whether it worked.
+func (s *server) imagePasteSet(w http.ResponseWriter, r *http.Request) {
+	alias := strings.TrimSpace(r.PathValue("alias"))
+	if !safeAlias.MatchString(alias) {
+		writeErr(w, http.StatusBadRequest, errBadAlias.Error())
+		return
+	}
+	if s.m.book == nil || !s.m.book.Known(alias) {
+		writeErr(w, http.StatusBadRequest, errUnknownHost.Error())
+		return
+	}
+	if s.m.paste == nil {
+		writeErr(w, http.StatusServiceUnavailable, "image paste is not available in this daemon")
+		return
+	}
+	body, err := readAndRestore(r)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "body too large")
+		return
+	}
+	var in struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err := json.Unmarshal(body, &in); err != nil || in.Enabled == nil {
+		writeErr(w, http.StatusBadRequest, `body must be {"enabled": true|false}`)
+		return
+	}
+
+	if !*in.Enabled {
+		if err := s.m.paste.disable(alias, s.m.isHealthy(alias)); err != nil {
+			writeErr(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, s.m.paste.view(alias))
+		return
+	}
+	if err := s.m.ensureUp(alias); err != nil {
+		writeErr(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	if err := s.m.paste.enable(alias); err != nil {
+		writeErr(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, s.m.paste.view(alias))
 }

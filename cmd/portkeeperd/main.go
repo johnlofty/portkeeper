@@ -49,6 +49,10 @@ func main() {
 	if n := len(m.pins.List()); n > 0 {
 		log.Printf("%d pinned mapping(s) from %s", n, cfg.PinnedFile)
 	}
+	m.paste = newImagePaste(cfg, run, systemPasteboard())
+	if n := len(m.paste.enabledHosts()); n > 0 {
+		log.Printf("image paste on for %d host(s)", n)
+	}
 	m.newMaster = func(host string) masterCtl {
 		return &sshMaster{cfg: cfg, host: host, run: run}
 	}
