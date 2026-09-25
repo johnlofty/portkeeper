@@ -60,9 +60,11 @@ public struct HostHealth: Codable, Equatable, Sendable {
 ///
 /// The collections are optional because Go encodes a nil map or slice as `null`, and an
 /// idle daemon must not read as a broken one. api_version is optional because a daemon
-/// older than the field is still a daemon this app can show.
+/// older than the field is still a daemon this app can show. version is the release the
+/// daemon was built as ("v0.1.4", or "dev"); a daemon older than the field has none.
 public struct Status: Codable, Equatable, Sendable {
     public var apiVersion: Int?
+    public var version: String?
     public var listen: String
     public var hosts: [String: HostHealth]?
     public var eagerHosts: [String]?
@@ -72,7 +74,7 @@ public struct Status: Codable, Equatable, Sendable {
     public var pinned: Int?
 
     enum CodingKeys: String, CodingKey {
-        case listen, hosts, forwards, pinned
+        case listen, hosts, forwards, pinned, version
         case apiVersion = "api_version"
         case eagerHosts = "eager_hosts"
         case maxForwards = "max_forwards"

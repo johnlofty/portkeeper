@@ -571,6 +571,7 @@
     <div class="side-foot">
       <div id="daemon-line">Daemon on this Mac</div>
       <div>Log at /tmp/portkeeper.log</div>
+      <div id="version-line" class="hidden"></div>
     </div>
   </nav>
 
@@ -855,6 +856,7 @@
   };
   var hostOnly   = document.getElementById("h-only");
   var daemonLine = document.getElementById("daemon-line");
+  var versionLine = document.getElementById("version-line");
 
   var flashEl    = document.getElementById("flash");
   var downEl     = document.getElementById("down");
@@ -1267,6 +1269,11 @@
       st = st || {};
       hostHealth = (st.hosts && typeof st.hosts === "object" && !Array.isArray(st.hosts)) ? st.hosts : {};
       if (typeof st.listen === "string" && st.listen) daemonLine.textContent = "Daemon on " + st.listen;
+      // A daemon older than the version field says nothing, and so does this line.
+      if (typeof st.version === "string" && st.version) {
+        versionLine.textContent = "Version " + st.version;
+        versionLine.classList.remove("hidden");
+      }
       statusStale = false;
     }).catch(function () { /* the row states still say enough */ });
   }

@@ -17,7 +17,7 @@ final class DecodeTests: XCTestCase {
           "age":800,"state":"reconnecting","requester":"","auto_opened":false,"pinned":false}]
         """
         let status = """
-        {"api_version":1,"listen":"127.0.0.1:9996",
+        {"api_version":1,"version":"v0.1.4","listen":"127.0.0.1:9996",
          "hosts":{"code":{"healthy":true,"attempts":0,"next_retry_in":0,"last_error":""},
                   "gcp-ubuntu":{"healthy":false,"attempts":3,"next_retry_in":40,
                                 "last_error":"ssh: connect to host timed out"}},
@@ -33,6 +33,7 @@ final class DecodeTests: XCTestCase {
 
         let st = try JSONDecoder().decode(Status.self, from: Data(status.utf8))
         XCTAssertEqual(st.apiVersion, 1)
+        XCTAssertEqual(st.version, "v0.1.4")
         XCTAssertEqual(st.hosts?["gcp-ubuntu"]?.attempts, 3)
         XCTAssertEqual(st.hosts?["gcp-ubuntu"]?.nextRetryIn, 40)
         XCTAssertEqual(st.defaultTTL, 28800)
@@ -43,6 +44,7 @@ final class DecodeTests: XCTestCase {
          "max_forwards":64,"default_ttl":28800,"forwards":0,"pinned":0}
         """.utf8))
         XCTAssertNil(idle.apiVersion)
+        XCTAssertNil(idle.version)
         XCTAssertNil(idle.hosts)
 
         let sections = HostSection.build(forwards: fs, status: st)
