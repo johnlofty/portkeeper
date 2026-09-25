@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -259,11 +260,20 @@ func TestOpenShimAgainstRealSocket(t *testing.T) {
 		t.Skip("curl not installed")
 	}
 	dir := shortDir(t)
+	// The server runs on its own goroutine; the test reads what it recorded.
+	var mu sync.Mutex
 	var got []string
+	seen := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), got...)
+	}
 	h := http.NewServeMux()
 	h.HandleFunc(openRoute, func(w http.ResponseWriter, r *http.Request) {
 		serveOpen(w, r, "code", func(host, u string) (openResult, error) {
+			mu.Lock()
 			got = append(got, u)
+			mu.Unlock()
 			if strings.Contains(u, "evil") {
 				return openResult{}, callerErrf("evil.com is not a trusted sign-in provider in Portkeeper")
 			}
@@ -293,8 +303,8 @@ func TestOpenShimAgainstRealSocket(t *testing.T) {
 			t.Fatalf("%s: %v %s", name, err, out)
 		}
 	}
-	if len(got) != 3 || got[0] != quoted {
-		t.Fatalf("daemon got %q", got)
+	if g := seen(); len(g) != 3 || g[0] != quoted {
+		t.Fatalf("daemon got %q", g)
 	}
 	out, err := run("xdg-open", "https://evil.com/")
 	if err == nil || !strings.Contains(out, "not a trusted sign-in provider") {
@@ -304,8 +314,8 @@ func TestOpenShimAgainstRealSocket(t *testing.T) {
 	if _, err := run("xdg-open", "/tmp/file.txt"); err == nil {
 		t.Fatal("a file path was accepted")
 	}
-	if len(got) != 4 {
-		t.Fatalf("a non-URL reached the daemon: %q", got)
+	if g := seen(); len(g) != 4 {
+		t.Fatalf("a non-URL reached the daemon: %q", g)
 	}
 }
 
