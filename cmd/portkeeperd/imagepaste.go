@@ -326,6 +326,7 @@ type pasteHost struct {
 	err        string
 	problem    *shimProblem // image paste is on but its shell will not find wl-paste
 	loginProb  *shimProblem // the same for browser login's stand-ins
+	checked    bool         // the stand-ins were (re)installed and checked this daemon run
 }
 
 // imagePaste owns every host's channel: one unix socket per host, forwarded over its
@@ -546,6 +547,7 @@ func (p *imagePaste) enable(host string) error {
 	}
 	p.mu.Lock()
 	p.hostLocked(host).problem = problem
+	p.hostLocked(host).checked = true
 	p.enabled[host] = true
 	saveErr := p.saveLocked()
 	p.mu.Unlock()
@@ -624,6 +626,55 @@ func (p *imagePaste) ensure(host string) {
 	p.setErr(host, err)
 	if err != nil {
 		logf("image paste %s: %v", host, err)
+		return
+	}
+	p.recheckLocked(host)
+}
+
+// recheckLocked reinstalls each enabled feature's stand-ins once per daemon run and
+// records whether the host's shell finds them. Without it, readiness would be known only
+// from the last click in the console: a daemon restart, such as every upgrade, would
+// place the channel again and report "on" for a host whose shell cannot find the
+// stand-in. Reinstalling also brings the scripts up to this release. The caller holds
+// opMu.
+func (p *imagePaste) recheckLocked(host string) {
+	p.mu.Lock()
+	ph := p.hostLocked(host)
+	done, sock := ph.checked, ph.remoteSock
+	paste, login := p.enabled[host], p.login[host]
+	p.mu.Unlock()
+	if done || sock == "" {
+		return
+	}
+	var pasteProb, loginProb *shimProblem
+	if paste {
+		sp, err := p.installShim(host, "wl-paste", shimFor(sock))
+		if err != nil {
+			logf("image paste %s: %v", host, err)
+			return
+		}
+		pasteProb = sp
+	}
+	if login {
+		for _, name := range openShimNames {
+			sp, err := p.installShim(host, name, openShimFor(sock))
+			if err != nil {
+				logf("browser login %s: %v", host, err)
+				return
+			}
+			if sp != nil && name != "portkeeper-open" && loginProb == nil {
+				loginProb = sp
+			}
+		}
+	}
+	p.mu.Lock()
+	ph.problem, ph.loginProb, ph.checked = pasteProb, loginProb, true
+	p.mu.Unlock()
+	if pasteProb != nil {
+		logf("image paste %s: needs setup: %s", host, pasteProb.msg)
+	}
+	if loginProb != nil {
+		logf("browser login %s: needs setup: %s", host, loginProb.msg)
 	}
 }
 

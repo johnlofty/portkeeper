@@ -359,6 +359,7 @@ func (p *imagePaste) enableLogin(host string) error {
 	}
 	p.mu.Lock()
 	p.hostLocked(host).loginProb = problem
+	p.hostLocked(host).checked = true
 	p.login[host] = true
 	saveErr := p.saveLocked()
 	placed := p.hostLocked(host).placed

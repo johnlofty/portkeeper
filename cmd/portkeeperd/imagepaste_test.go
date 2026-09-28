@@ -432,3 +432,32 @@ func TestReadinessCheckReadsTheRcFile(t *testing.T) {
 		t.Fatalf("the check does not use an interactive login shell: %s", cmd)
 	}
 }
+
+// A daemon restart must not turn a broken host back into "on": the first placement after
+// startup reinstalls the stand-in and checks the shell again.
+func TestRestartRechecksReadiness(t *testing.T) {
+	sr := goodRunner()
+	sr.found = ""
+	p := testPaste(t, sr)
+	if err := p.enable("code"); err != nil {
+		t.Fatal(err)
+	}
+	p.shutdown()
+
+	again := newImagePaste(p.cfg, sr, &fakePasteboard{})
+	t.Cleanup(again.shutdown)
+	again.ensure("code")
+	if v := again.view("code"); !v.Active || v.Ready || v.Fix == "" {
+		t.Fatalf("after a restart: %+v, want active, not ready, with a fix", v)
+	}
+
+	// Fixed on the host, then another restart: ready without any click.
+	again.shutdown()
+	sr.found = "/home/u/.local/bin/wl-paste"
+	third := newImagePaste(p.cfg, sr, &fakePasteboard{})
+	t.Cleanup(third.shutdown)
+	third.ensure("code")
+	if v := third.view("code"); !v.Ready {
+		t.Fatalf("after the fix and a restart: %+v, want ready", v)
+	}
+}
