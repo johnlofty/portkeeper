@@ -512,6 +512,22 @@
   .test-note[data-kind="fail"] { border-left-color: var(--amber-dot); color: var(--amber); }
   .host-note { font-size: 12px; color: var(--caption); }
   .host-note.warn { color: var(--amber); }
+  /* A host feature that is on but will not work yet: what is wrong, and the one line
+     that fixes it. */
+  .btn.ghost.needs-setup { border-color: var(--amber-dot); color: var(--amber); }
+  .host-fix {
+    margin-top: 10px; padding: 10px 12px; border-radius: 0 6px 6px 0; font-size: 12px;
+    border-left: 3px solid var(--amber-dot); background: var(--window); color: var(--ink2);
+    max-width: 760px;
+  }
+  .host-fix + .host-fix { margin-top: 8px; }
+  .host-fix p { margin: 0 0 6px; overflow-wrap: anywhere; }
+  .host-fix code {
+    display: block; padding: 6px 8px; border-radius: 4px; background: var(--selected);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+    overflow-x: auto; white-space: pre;
+  }
+  .host-fix .fix-btns { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
 
   /* ---- narrow ------------------------------------------------------- */
 
@@ -607,6 +623,7 @@
           </button>
         </div>
       </div>
+      <div id="host-fixes"></div>
 
       <div class="hidden" id="table-wrap">
         <div class="legend grid5" aria-hidden="true">
@@ -838,6 +855,7 @@
   var hostEdit   = document.getElementById("host-edit");
   var hostPaste  = document.getElementById("host-paste");
   var hostLogin  = document.getElementById("host-login");
+  var hostFixes  = document.getElementById("host-fixes");
   var hostNote   = document.getElementById("host-note");
   var hsheet     = document.getElementById("hsheet");
   var hostForm   = document.getElementById("host-form");
@@ -1587,13 +1605,13 @@
     // An incomplete host has nowhere to connect to, so nothing that would connect is offered.
     addOpenBtn.disabled = emptyAdd.disabled = emptyDisc.disabled = !!h.incomplete;
     var ps = pasteState[selected] || {};
-    if (ps.enabled && (ps.warning || ps.error)) {
-      note = (note ? note + " " : "") + "Image paste: " + (ps.warning || ps.error);
+    if (ps.enabled && ps.error) {
+      note = (note ? note + " " : "") + "Image paste: " + ps.error;
       warn = true;
     }
     var ls = loginState[selected] || {};
-    if (ls.enabled && (ls.warning || ls.error)) {
-      note = (note ? note + " " : "") + "Browser login: " + (ls.warning || ls.error);
+    if (ls.enabled && ls.error) {
+      note = (note ? note + " " : "") + "Browser login: " + ls.error;
       warn = true;
     }
     hostNote.textContent = note;
@@ -1601,6 +1619,84 @@
     hostNote.classList.toggle("hidden", !note);
     paintPaste(h);
     paintLogin(h);
+    paintFixes();
+  }
+
+  // A feature is "needs setup" when it is on and its channel is up, but the host's shell
+  // will not find the stand-in. A daemon older than the ready field reports none, and is
+  // taken at its word.
+  function needsSetup(st) {
+    return !!(st && st.enabled && st.active && st.ready === false && st.warning);
+  }
+
+  var features = {
+    paste: { name: "Image paste", path: "/image-paste", state: function () { return pasteState; } },
+    login: { name: "Browser login", path: "/browser-login", state: function () { return loginState; } }
+  };
+
+  // Turns a feature on (which reinstalls and re-checks) or off, and repaints.
+  function setFeature(key, alias, on) {
+    var f = features[key];
+    return api("PUT", API + "/hosts/" + encodeURIComponent(alias) + f.path, { enabled: on }).then(function (v) {
+      if (!on) flash("added", f.name + " is off for " + alias + ".");
+      else if (needsSetup(v)) flash("error", f.name + " on " + alias + " still needs setup. Run the line shown, then Check again.");
+      else flash("added", f.name + " works on " + alias + " now.");
+    }).catch(function (err) {
+      flash("error", msgOf(err, "Could not change " + f.name.toLowerCase() + " for " + alias + "."));
+    }).then(function () {
+      return Promise.all([fetchPaste(), fetchStatus()]);
+    }).then(renderAll);
+  }
+
+  function paintFixes() {
+    hostFixes.textContent = "";
+    ["paste", "login"].forEach(function (key) {
+      var f = features[key], st = f.state()[selected];
+      if (!needsSetup(st)) return;
+      var alias = selected;
+      var box = el("div", "host-fix");
+      box.setAttribute("role", "status");
+      var p = el("p");
+      p.textContent = f.name + " is on, but it will not work yet. " + st.warning +
+        (st.fix ? " Run this on " + alias + ", then open a new shell:" : "");
+      box.appendChild(p);
+      if (st.fix) {
+        var code = el("code");
+        code.textContent = st.fix;
+        box.appendChild(code);
+      }
+      var btns = el("div", "fix-btns");
+      if (st.fix) {
+        var copy = el("button", "btn ghost small");
+        copy.type = "button";
+        copy.textContent = "Copy";
+        copy.addEventListener("click", function () {
+          (navigator.clipboard ? navigator.clipboard.writeText(st.fix) : Promise.reject()).then(function () {
+            copy.textContent = "Copied";
+          }).catch(function () { copy.textContent = "Select and copy"; });
+        });
+        btns.appendChild(copy);
+      }
+      var again = el("button", "btn ghost small");
+      again.type = "button";
+      again.textContent = "Check again";
+      again.addEventListener("click", function () {
+        again.disabled = true;
+        again.textContent = "Checking\u2026";
+        setFeature(key, alias, true);
+      });
+      btns.appendChild(again);
+      var off = el("button", "btn ghost small");
+      off.type = "button";
+      off.textContent = "Turn off";
+      off.addEventListener("click", function () {
+        off.disabled = true;
+        setFeature(key, alias, false);
+      });
+      btns.appendChild(off);
+      box.appendChild(btns);
+      hostFixes.appendChild(box);
+    });
   }
 
   function paintLogin(h) {
@@ -1609,7 +1705,10 @@
     var ls = loginState[selected] || {};
     hostLogin.disabled = !!h.incomplete;
     hostLogin.setAttribute("aria-pressed", ls.enabled ? "true" : "false");
+    var lsSetup = needsSetup(ls);
+    hostLogin.classList.toggle("needs-setup", lsSetup);
     hostLogin.textContent = !ls.enabled ? "Enable browser login"
+      : lsSetup ? "Browser login: needs setup"
       : ls.active ? "Browser login on" : "Browser login reconnecting";
     hostLogin.title = !ls.enabled
       ? "Open sign-in pages from " + selected + " (aws sso login, gcloud, az, gh...) in your Mac's browser, and forward the login's callback port back. Installs xdg-open and www-browser on the host."
@@ -1619,13 +1718,14 @@
   hostLogin.addEventListener("click", function () {
     var alias = selected;
     if (!alias || loginBusy) return;
-    var on = !(loginState[alias] || {}).enabled;
+    var on = !(loginState[alias] || {}).enabled || needsSetup(loginState[alias]);
     loginBusy = true;
     hostLogin.disabled = true;
     hostLogin.textContent = on ? "Turning on\u2026" : "Turning off\u2026";
-    api("PUT", API + "/hosts/" + encodeURIComponent(alias) + "/browser-login", { enabled: on }).then(function () {
-      flash("added", on
-        ? "Browser login is on for " + alias + ". Run a login there, such as aws sso login, and it opens here."
+    api("PUT", API + "/hosts/" + encodeURIComponent(alias) + "/browser-login", { enabled: on }).then(function (v) {
+      if (on && needsSetup(v)) flash("error", "Browser login is installed on " + alias + ", but it will not work yet. See below.");
+      else flash("added", on
+        ? "Browser login works on " + alias + ". Run a login there, such as aws sso login, and it opens here."
         : "Browser login is off for " + alias + ".");
     }).catch(function (err) {
       flash("error", msgOf(err, "Could not change browser login for " + alias + "."));
@@ -1642,7 +1742,10 @@
     var ps = pasteState[selected] || {};
     hostPaste.disabled = !!h.incomplete;
     hostPaste.setAttribute("aria-pressed", ps.enabled ? "true" : "false");
+    var psSetup = needsSetup(ps);
+    hostPaste.classList.toggle("needs-setup", psSetup);
     hostPaste.textContent = !ps.enabled ? "Enable image paste"
+      : psSetup ? "Image paste: needs setup"
       : ps.active ? "Image paste on" : "Image paste reconnecting";
     hostPaste.title = !ps.enabled
       ? "Paste a Mac screenshot into Claude Code on " + selected + " with Ctrl+V. Installs a small wl-paste on the host."
@@ -1652,13 +1755,15 @@
   hostPaste.addEventListener("click", function () {
     var alias = selected;
     if (!alias || pasteBusy) return;
-    var on = !(pasteState[alias] || {}).enabled;
+    // On but not working: a click checks again rather than turning it off.
+    var on = !(pasteState[alias] || {}).enabled || needsSetup(pasteState[alias]);
     pasteBusy = true;
     hostPaste.disabled = true;
     hostPaste.textContent = on ? "Turning on\u2026" : "Turning off\u2026";
     api("PUT", API + "/hosts/" + encodeURIComponent(alias) + "/image-paste", { enabled: on }).then(function (v) {
-      flash("added", on
-        ? "Image paste is on for " + alias + ". Copy a screenshot, then press Ctrl+V in Claude Code there."
+      if (on && needsSetup(v)) flash("error", "Image paste is installed on " + alias + ", but it will not work yet. See below.");
+      else flash("added", on
+        ? "Image paste works on " + alias + ". Copy a screenshot, then press Ctrl+V in Claude Code there."
         : "Image paste is off for " + alias + ".");
     }).catch(function (err) {
       flash("error", msgOf(err, "Could not change image paste for " + alias + "."));

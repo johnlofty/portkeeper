@@ -343,19 +343,23 @@ func (p *imagePaste) enableLogin(host string) error {
 		p.setErr(host, err)
 		return err
 	}
-	var warns []string
+	// Only xdg-open and www-browser are found by tools on their own; portkeeper-open is
+	// reached through BROWSER, which names it. One problem is enough to report: the fix,
+	// ~/.local/bin on PATH, is the same for both.
+	var problem *shimProblem
 	for _, name := range openShimNames {
-		warn, err := p.installShim(host, name, openShimFor(sock))
+		sp, err := p.installShim(host, name, openShimFor(sock))
 		if err != nil {
 			p.setErr(host, err)
 			return err
 		}
-		if warn != "" && name != "portkeeper-open" {
-			warns = append(warns, warn)
+		if sp != nil && name != "portkeeper-open" && problem == nil {
+			problem = sp
 		}
 	}
 	p.mu.Lock()
-	p.hostLocked(host).loginWarn = strings.Join(warns, " ")
+	p.hostLocked(host).loginProb = problem
+	p.hostLocked(host).checked = true
 	p.login[host] = true
 	saveErr := p.saveLocked()
 	placed := p.hostLocked(host).placed
@@ -375,11 +379,14 @@ func (p *imagePaste) disableLogin(host string, reachable bool) error {
 	return p.turnOff(host, reachable, p.login, openShimNames, "browser login")
 }
 
+// loginView has pasteView's meaning, for browser login.
 type loginView struct {
 	Enabled bool   `json:"enabled"`
 	Active  bool   `json:"active"`
+	Ready   bool   `json:"ready"`
 	Error   string `json:"error,omitempty"`
 	Warning string `json:"warning,omitempty"`
+	Fix     string `json:"fix,omitempty"`
 }
 
 func (p *imagePaste) loginViews() map[string]loginView {
@@ -389,7 +396,9 @@ func (p *imagePaste) loginViews() map[string]loginView {
 	for h := range p.login {
 		v := loginView{Enabled: true}
 		if ph, ok := p.hosts[h]; ok {
-			v.Active, v.Error, v.Warning = ph.placed, ph.err, ph.loginWarn
+			v.Active, v.Error = ph.placed, ph.err
+			v.Warning, v.Fix = ph.loginProb.text()
+			v.Ready = v.Active && ph.loginProb == nil
 		}
 		out[h] = v
 	}

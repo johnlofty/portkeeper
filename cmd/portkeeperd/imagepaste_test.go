@@ -109,6 +109,7 @@ type scriptRunner struct {
 	fwd   string // output of -O forward
 	fwdOK bool
 	found string // where a login shell finds wl-paste
+	shell string // the user's login shell; /bin/bash when empty
 	stdin string
 }
 
@@ -136,7 +137,11 @@ func (s *scriptRunner) runInput(argv []string, stdin string) (string, error) {
 	s.stdin = stdin
 	s.mu.Unlock()
 	s.run(argv)
-	return "shim=/home/u/.local/bin/wl-paste\nfound=" + s.found + "\n", nil
+	shell := s.shell
+	if shell == "" {
+		shell = "/bin/bash"
+	}
+	return "shim=/home/u/.local/bin/wl-paste\nshell=" + shell + "\nfound=" + s.found + "\n", nil
 }
 
 func (s *scriptRunner) indexOf(sub string) int {
@@ -374,5 +379,85 @@ func TestShimAgainstRealSocket(t *testing.T) {
 		if out, err := run(args...); err == nil || len(out) != 0 {
 			t.Fatalf("%v: exit 0 or output %q", args, out)
 		}
+	}
+}
+
+// "On" must mean it works. A stand-in the shell cannot find is installed but not ready,
+// and the view carries the one line that fixes it for that shell.
+func TestNotReadyWhenTheShellCannotFindIt(t *testing.T) {
+	sr := goodRunner()
+	sr.found = ""
+	sr.shell = "/bin/bash"
+	p := testPaste(t, sr)
+	if err := p.enable("code"); err != nil {
+		t.Fatal(err)
+	}
+	v := p.view("code")
+	if !v.Enabled || !v.Active || v.Ready {
+		t.Fatalf("view %+v: want enabled and active but not ready", v)
+	}
+	if !strings.Contains(v.Warning, "no ~/.local/bin on PATH") || !strings.Contains(v.Fix, ">> ~/.bashrc") {
+		t.Fatalf("warning %q, fix %q", v.Warning, v.Fix)
+	}
+
+	// The user fixes PATH and checks again: enabling re-checks, and it is ready.
+	sr.found = "/home/u/.local/bin/wl-paste"
+	if err := p.enable("code"); err != nil {
+		t.Fatal(err)
+	}
+	if v := p.view("code"); !v.Ready || v.Warning != "" || v.Fix != "" {
+		t.Fatalf("after the fix: %+v", v)
+	}
+}
+
+func TestPathFixFollowsTheShell(t *testing.T) {
+	for shell, want := range map[string]string{
+		"/bin/bash":     "~/.bashrc",
+		"/usr/bin/zsh":  "~/.zshrc",
+		"/usr/bin/fish": "fish_add_path",
+		"/bin/sh":       "~/.profile",
+		"":              "~/.profile",
+	} {
+		if got := pathFix(shell); !strings.Contains(got, want) {
+			t.Errorf("%q: %q, want it to mention %s", shell, got, want)
+		}
+	}
+}
+
+// The check must ask an interactive login shell: Ubuntu's ~/.bashrc returns at once when
+// not interactive, so a PATH line added there is invisible to bash -lc.
+func TestReadinessCheckReadsTheRcFile(t *testing.T) {
+	cmd := installShimCmd("wl-paste")
+	if !strings.Contains(cmd, `-lic 'command -v wl-paste'`) {
+		t.Fatalf("the check does not use an interactive login shell: %s", cmd)
+	}
+}
+
+// A daemon restart must not turn a broken host back into "on": the first placement after
+// startup reinstalls the stand-in and checks the shell again.
+func TestRestartRechecksReadiness(t *testing.T) {
+	sr := goodRunner()
+	sr.found = ""
+	p := testPaste(t, sr)
+	if err := p.enable("code"); err != nil {
+		t.Fatal(err)
+	}
+	p.shutdown()
+
+	again := newImagePaste(p.cfg, sr, &fakePasteboard{})
+	t.Cleanup(again.shutdown)
+	again.ensure("code")
+	if v := again.view("code"); !v.Active || v.Ready || v.Fix == "" {
+		t.Fatalf("after a restart: %+v, want active, not ready, with a fix", v)
+	}
+
+	// Fixed on the host, then another restart: ready without any click.
+	again.shutdown()
+	sr.found = "/home/u/.local/bin/wl-paste"
+	third := newImagePaste(p.cfg, sr, &fakePasteboard{})
+	t.Cleanup(third.shutdown)
+	third.ensure("code")
+	if v := third.view("code"); !v.Ready {
+		t.Fatalf("after the fix and a restart: %+v, want ready", v)
 	}
 }

@@ -1566,3 +1566,39 @@ Turning one feature off removes only its stand-ins.
 - `localhost` redirects over IPv6. The forward binds `127.0.0.1` only, because
   `dirLocal.spec()` pins the Mac side to IPv4; Chrome and Safari fall back from `::1` to
   `127.0.0.1` when it is refused.
+
+## "On" means it works (2026-09-28)
+
+On portal1, **Image paste on** was showing for a host where it could never work. The
+stand-in was installed and the socket was forwarded, but root's `PATH` on Ubuntu has no
+`~/.local/bin`, so Claude Code would never find `wl-paste` there. The PATH check did run,
+but its result was only a grey note, while the button said on. Two changes.
+
+**The views gain `ready` and `fix`.** `ready` means the feature is enabled, its channel
+is up, and the user's shell finds the stand-in. The console shows
+**Image paste: needs setup** in amber when a feature is on but not ready. It adds a panel
+with the reason and the exact line for that shell: `~/.bashrc` for bash, `~/.zshrc` for
+zsh, `fish_add_path` for fish, otherwise `~/.profile`. The panel has **Copy**,
+**Check again** and **Turn off**. Clicking a needs-setup button re-checks instead of
+turning the feature off.
+
+**The check itself was wrong in two ways.**
+
+- **It asked a non-interactive login shell** (`$SHELL -lc`). On Ubuntu, `~/.bashrc`
+  starts with `[ -z "$PS1" ] && return`, so a PATH line added there, which is where
+  people add it, would never be seen, and a fixed host would still read as broken. It
+  now asks an interactive login shell (`-lic`). On portal1 root's `.profile` sources
+  `.bashrc`, and `-i` gets past the early return. Only a line starting with `/` counts,
+  because interactive shells with no terminal print greetings and job-control noise.
+- **It never worked on zsh hosts.** ssh runs the command through the user's login shell.
+  The timeout was held in `$T="timeout 5"` and expanded unquoted, but zsh does not split
+  words, so it ran a command literally named `timeout 5` and the check always came back
+  empty. That was seen on `code`, whose shell is zsh. The two cases are now written out.
+
+**Verified.** The generated command was run with a throwaway name on both hosts:
+
+- `code` (zsh) reported the stand-in as found;
+- portal1 (bash) reported nothing found, with the `~/.bashrc` fix.
+
+The console's needs-setup panel was rendered and driven in headless Chromium, and
+**Check again** sent `{"enabled":true}` and cleared it.

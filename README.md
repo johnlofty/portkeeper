@@ -104,6 +104,10 @@ on the left.
   `aws sso login --profile <name>` (or `gcloud auth login`, `gh auth login`, …) in a
   terminal on the host. The page opens on the Mac. A Python tool run outside a terminal
   (no `TERM`) also needs `export BROWSER=portkeeper-open` on the host.
+- **If a button says "needs setup".** The feature is installed, but your shell on that
+  host would never find it, usually because `~/.local/bin` is not on its `PATH` (root's
+  default on Ubuntu, for example). The console shows the one line to run there, for your
+  shell. Run it, open a new shell, and click **Check again**. "On" only ever means it works.
 
 The popover shows each host's state and its mappings. Quitting the app leaves the daemon
 and every mapping running.
