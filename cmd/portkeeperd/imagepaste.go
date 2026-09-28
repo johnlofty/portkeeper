@@ -203,15 +203,60 @@ func removeShimCmd(name string) string {
 	return fmt.Sprintf(`f="$HOME/.local/bin/%s"; if [ -f "$f" ] && grep -q %s "$f"; then rm -f "$f"; fi`, name, shimMarker)
 }
 
-// installShimCmd writes the stand-in from stdin. It refuses to replace a wl-paste that
-// is not ours, then reports where a login shell finds wl-paste, so a PATH that misses
-// ~/.local/bin is caught at install time rather than as a paste that silently does nothing.
+// installShimCmd writes the stand-in from stdin. It refuses to replace a file that is
+// not ours, then reports which shell the user has and where that shell finds the name.
+// A PATH that misses ~/.local/bin is caught here, not as a paste that silently does
+// nothing.
+//
+// The shell is asked as an interactive login shell (-lic), which reads both the profile
+// and the rc file. A plain login shell (-lc) is not enough: Ubuntu's ~/.bashrc returns
+// at once when not interactive, so a PATH line added there would never be seen, and
+// the host would be reported broken after the user fixed it. With no terminal, an
+// interactive shell may print job-control noise or a greeting, so only a line starting
+// with / counts, and timeout keeps a slow rc file from holding the request.
+//
+// ssh runs this through the user's login shell, which may be zsh. zsh does not split an
+// unquoted variable into words, so "$T" holding "timeout 5" would run a command named
+// "timeout 5" and find nothing. Seen on code, where the check always came back empty.
+// The two cases are spelled out instead.
 func installShimCmd(name string) string {
 	return fmt.Sprintf(`set -e; d="$HOME/.local/bin"; f="$d/%[1]s"; `+
 		`if [ -e "$f" ] && ! grep -q %[2]s "$f"; then `+
 		`echo "$f exists and is not Portkeeper's; leaving it alone" >&2; exit 3; fi; `+
 		`mkdir -p "$d"; cat > "$f.portkeeper-tmp"; chmod 755 "$f.portkeeper-tmp"; mv "$f.portkeeper-tmp" "$f"; `+
-		`echo "shim=$f"; echo "found=$("${SHELL:-/bin/sh}" -lc 'command -v %[1]s' 2>/dev/null </dev/null | tail -n 1)"`, name, shimMarker)
+		`s="${SHELL:-/bin/sh}"; echo "shim=$f"; echo "shell=$s"; `+
+		`if command -v timeout >/dev/null 2>&1; then `+
+		`found=$(timeout 5 "$s" -lic 'command -v %[1]s' 2>/dev/null </dev/null | grep '^/' | tail -n 1 || true); `+
+		`else found=$("$s" -lic 'command -v %[1]s' 2>/dev/null </dev/null | grep '^/' | tail -n 1 || true); fi; `+
+		`echo "found=$found"`, name, shimMarker)
+}
+
+// shimProblem is why a feature is on but will not work: the host's shell does not find
+// the stand-in. fix is the one line that makes it work, for that shell.
+type shimProblem struct {
+	msg string
+	fix string
+}
+
+func (sp *shimProblem) text() (string, string) {
+	if sp == nil {
+		return "", ""
+	}
+	return sp.msg, sp.fix
+}
+
+// pathFix is the line that puts ~/.local/bin on PATH for a given login shell.
+func pathFix(shell string) string {
+	switch filepath.Base(shell) {
+	case "zsh":
+		return `echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc`
+	case "fish":
+		return `fish -c 'fish_add_path ~/.local/bin'`
+	case "bash":
+		return `echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc`
+	default:
+		return `echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.profile`
+	}
 }
 
 // shimScript is the stand-in. POSIX sh and curl only, so it runs on any box that has
@@ -279,8 +324,8 @@ type pasteHost struct {
 	remoteSock string // resolved once per daemon run; empty until then
 	placed     bool   // the forward is on the current master
 	err        string
-	warn       string // image paste's PATH warning
-	loginWarn  string // browser login's
+	problem    *shimProblem // image paste is on but its shell will not find wl-paste
+	loginProb  *shimProblem // the same for browser login's stand-ins
 }
 
 // imagePaste owns every host's channel: one unix socket per host, forwarded over its
@@ -494,13 +539,13 @@ func (p *imagePaste) enable(host string) error {
 		p.setErr(host, err)
 		return err
 	}
-	warn, err := p.installShim(host, "wl-paste", shimFor(sock))
+	problem, err := p.installShim(host, "wl-paste", shimFor(sock))
 	if err != nil {
 		p.setErr(host, err)
 		return err
 	}
 	p.mu.Lock()
-	p.hostLocked(host).warn = warn
+	p.hostLocked(host).problem = problem
 	p.enabled[host] = true
 	saveErr := p.saveLocked()
 	p.mu.Unlock()
@@ -610,36 +655,41 @@ func (p *imagePaste) resolveRemoteSock(host string) (string, error) {
 	return sock, nil
 }
 
-// installShim writes the stand-in and returns a warning when a login shell on the host
-// would not find it.
-func (p *imagePaste) installShim(host, name, content string) (string, error) {
+// installShim writes a stand-in and reports a problem when the user's shell on the host
+// would not run it: the file is in place, but nothing there would ever find it.
+func (p *imagePaste) installShim(host, name, content string) (*shimProblem, error) {
 	ir, ok := p.run.(inputRunner)
 	if !ok {
-		return "", errPasteNoRunner
+		return nil, errPasteNoRunner
 	}
 	out, err := ir.runInput(p.cfg.sshArgv(host, installShimCmd(name)), content)
 	if err != nil {
 		if msg := lastLine(out); msg != "" {
-			return "", fmt.Errorf("could not install %s on %s: %s", name, host, msg)
+			return nil, fmt.Errorf("could not install %s on %s: %s", name, host, msg)
 		}
-		return "", fmt.Errorf("could not install %s on %s: %w", name, host, err)
+		return nil, fmt.Errorf("could not install %s on %s: %w", name, host, err)
 	}
-	var shim, found string
+	var shim, shell, found string
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
 		if v, ok := strings.CutPrefix(line, "shim="); ok {
 			shim = v
+		} else if v, ok := strings.CutPrefix(line, "shell="); ok {
+			shell = v
 		} else if v, ok := strings.CutPrefix(line, "found="); ok {
 			found = v
 		}
 	}
-	if shim != "" && found != shim {
-		if found == "" {
-			found = "nothing"
-		}
-		return fmt.Sprintf("A login shell on %s finds %s for %s, not %s. Put ~/.local/bin on PATH before other directories.", host, found, name, shim), nil
+	if shim == "" || found == shim {
+		return nil, nil
 	}
-	return "", nil
+	sp := &shimProblem{fix: pathFix(shell)}
+	if found == "" {
+		sp.msg = fmt.Sprintf("%s is installed, but your shell on %s (%s) has no ~/.local/bin on PATH, so nothing there will find it.", name, host, filepath.Base(shell))
+	} else {
+		sp.msg = fmt.Sprintf("%s is installed, but your shell on %s (%s) finds %s first.", name, host, filepath.Base(shell), found)
+	}
+	return sp, nil
 }
 
 // placeLocked starts the local socket if needed and puts the forward on the host's
@@ -736,11 +786,17 @@ func (p *imagePaste) shutdown() {
 	}
 }
 
+// pasteView is what the console shows. enabled is the setting; active is the channel
+// being forwarded; ready is both of those and the host's shell finding the stand-in,
+// which is what "on" should mean. Warning says why a host is not ready, and fix is the
+// line that makes it so.
 type pasteView struct {
 	Enabled bool   `json:"enabled"`
 	Active  bool   `json:"active"`
+	Ready   bool   `json:"ready"`
 	Error   string `json:"error,omitempty"`
 	Warning string `json:"warning,omitempty"`
+	Fix     string `json:"fix,omitempty"`
 }
 
 func (p *imagePaste) views() map[string]pasteView {
@@ -750,7 +806,9 @@ func (p *imagePaste) views() map[string]pasteView {
 	for h := range p.enabled {
 		v := pasteView{Enabled: true}
 		if ph, ok := p.hosts[h]; ok {
-			v.Active, v.Error, v.Warning = ph.placed, ph.err, ph.warn
+			v.Active, v.Error = ph.placed, ph.err
+			v.Warning, v.Fix = ph.problem.text()
+			v.Ready = v.Active && ph.problem == nil
 		}
 		out[h] = v
 	}
